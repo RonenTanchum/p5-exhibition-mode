@@ -118,9 +118,12 @@ When `randomHash` is enabled, each playlist load receives a new `?hash=` value. 
 You can also edit the playlist directly inside the runtime panel:
 
 1. Press `Shift + G`.
-2. Paste one local HTML path or web URL per line in **Playlist URLs**.
-3. Click **Apply URLs**.
-4. Enable **Playlist Mode**.
+2. Open the **Playlist** tab.
+3. Use `+` to add a row or `-` to remove one.
+4. Type a local HTML path or full web URL.
+5. Use **Browse** for a temporary local `.html` file preview.
+6. Click **Apply URLs**.
+7. Enable **Playlist Mode**.
 
 Valid playlist entries:
 
@@ -130,6 +133,8 @@ Valid playlist entries:
 https://art.phenomenalabs.com/classical-revival/?ui=false
 https://example.com/live-generative-work
 ```
+
+Browser security note: choosing a file with **Browse** creates a temporary object URL for the selected HTML file. For production kiosks, local paths such as `./works/work-a/index.html` are usually better because relative assets remain predictable.
 
 ## Preparing Artworks for `?hash=`
 
@@ -258,11 +263,11 @@ new p5((sketch) => {
 
 The panel is intentionally quiet and exhibition-facing. It shows:
 
-- Artwork title, artist, seed
-- Resolution, DPR, FPS, fullscreen status
-- Context menu and touch gesture locks
-- Uptime, memory, reload count
-- Fullscreen, reset, screenshot, and diagnostics actions
+- **Runtime tab:** artwork metadata, display status, input locks, accessibility controls, rotation, watchdog, and system diagnostics.
+- **Playlist tab:** add/remove URL rows, browse temporary HTML files, set interval, enable random `?hash=`, and move between playlist items.
+- **Actions:** fullscreen, reset, screenshot, diagnostics, apply playlist URLs, previous URL, and next URL.
+
+The panel is designed to fit within the screen height. Controls are compact, and playlist editing uses row controls instead of a long scrolling textarea.
 
 ## Options
 

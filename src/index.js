@@ -524,10 +524,7 @@ export function createExhibitionMode(options = {}) {
     if (interval && document.activeElement !== interval) interval.value = d.playlistIntervalSeconds;
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
-    const playlistEditor = state.panel.querySelector("[data-input='playlist-items']");
-    if (playlistEditor && document.activeElement !== playlistEditor) {
-      playlistEditor.value = playlistItems().map((item) => typeof item === "string" ? item : item.url).join("\n");
-    }
+    syncPlaylistRows(state.panel, playlistItems());
   }
 
   function setText(key, value) {
@@ -581,47 +578,59 @@ function createPanel(config, api) {
       <span>Phenomena Exhibition Mode</span>
       <button type="button" data-action="close" aria-label="Close panel">×</button>
     </div>
-    <div class="p5em-panel-grid">
-      ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Seed", "p5em-seed"]])}
-      ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
-      ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
-      ${section("Playlist", [["Status", "p5em-playlist"], ["Interval", "p5em-playlist-interval"], ["Random Hash", "p5em-playlist-hash"]])}
-      ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
+    <div class="p5em-tabs" role="tablist" aria-label="Runtime panel sections">
+      <button type="button" class="is-active" data-tab="runtime" role="tab" aria-selected="true">Runtime</button>
+      <button type="button" data-tab="playlist" role="tab" aria-selected="false">Playlist</button>
     </div>
-    <div class="p5em-panel-controls">
-      ${toggle("context", "Context menu lock")}
-      ${toggle("touch", "Touch gestures lock")}
-      ${toggle("cursor", "Hide cursor")}
-      ${toggle("reduced-motion", "Reduced motion")}
-      ${toggle("high-contrast", "High contrast")}
-      ${toggle("playlist", "Playlist mode")}
-      ${toggle("playlist-hash", "Random ?hash=")}
-      <label class="p5em-number-control">
-        <span>Interval</span>
-        <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
-      </label>
-      <label class="p5em-number-control">
-        <span>Rotate</span>
-        <select data-input="rotation">
-          <option value="0">0</option>
-          <option value="90">90 CW</option>
-          <option value="270">90 CCW</option>
-          <option value="180">180</option>
-        </select>
-      </label>
+    <div class="p5em-tab-panel is-active" data-panel="runtime" role="tabpanel">
+      <div class="p5em-panel-grid">
+        ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Seed", "p5em-seed"]])}
+        ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
+        ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
+        ${section("Playlist", [["Status", "p5em-playlist"], ["Interval", "p5em-playlist-interval"], ["Random Hash", "p5em-playlist-hash"]])}
+        ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
+      </div>
+      <div class="p5em-panel-controls">
+        ${toggle("context", "Context menu lock")}
+        ${toggle("touch", "Touch gestures lock")}
+        ${toggle("cursor", "Hide cursor")}
+        ${toggle("reduced-motion", "Reduced motion")}
+        ${toggle("high-contrast", "High contrast")}
+        <label class="p5em-number-control">
+          <span>Rotate</span>
+          <select data-input="rotation">
+            <option value="0">0</option>
+            <option value="90">90 CW</option>
+            <option value="270">90 CCW</option>
+            <option value="180">180</option>
+          </select>
+        </label>
+      </div>
     </div>
-    <section class="p5em-playlist-editor">
-      <h2>Playlist URLs</h2>
-      <textarea data-input="playlist-items" spellcheck="false" placeholder="./local-sketch/index.html&#10;https://example.com/live-artwork"></textarea>
-      <p>One local HTML path or web URL per line.</p>
-    </section>
+    <div class="p5em-tab-panel" data-panel="playlist" role="tabpanel" hidden>
+      <section class="p5em-playlist-editor">
+        <div class="p5em-playlist-head">
+          <h2>Playlist URLs</h2>
+          <button type="button" data-action="playlist-add">+</button>
+        </div>
+        <div class="p5em-playlist-options">
+          ${toggle("playlist", "Playlist mode")}
+          ${toggle("playlist-hash", "Random ?hash=")}
+          <label class="p5em-number-control">
+            <span>Interval</span>
+            <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
+          </label>
+        </div>
+        <div class="p5em-playlist-rows" data-playlist-rows></div>
+        <p>Use a local HTML path, full web URL, or browse for a temporary HTML file.</p>
+      </section>
+    </div>
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
       <button type="button" data-action="screenshot">Screenshot</button>
       <button type="button" data-action="diagnostics">Diagnostics</button>
       <button type="button" data-action="playlist-apply">Apply URLs</button>
-      <button type="button" data-action="playlist-clear">Clear URLs</button>
       <button type="button" data-action="playlist-prev">Prev URL</button>
       <button type="button" data-action="playlist-next">Next URL</button>
     </div>
@@ -630,16 +639,18 @@ function createPanel(config, api) {
   panel.addEventListener("pointerdown", (event) => event.stopPropagation());
   panel.addEventListener("click", (event) => {
     const action = event.target?.dataset?.action;
+    const tab = event.target?.dataset?.tab;
+    if (tab) activatePanelTab(panel, tab);
     if (action === "close") api.togglePanel(false);
     if (action === "fullscreen") api.enterFullscreen();
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
     if (action === "playlist-apply") {
-      const value = panel.querySelector("[data-input='playlist-items']")?.value || "";
-      api.setPlaylistItems(parsePlaylistText(value));
+      api.setPlaylistItems(collectPlaylistRows(panel));
     }
-    if (action === "playlist-clear") api.setPlaylistItems([]);
+    if (action === "playlist-add") addPlaylistRow(panel, "");
+    if (action === "playlist-remove") event.target.closest(".p5em-playlist-row")?.remove();
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
   });
@@ -659,7 +670,16 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
     }
+    if (event.target?.dataset?.input === "playlist-file") {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const row = event.target.closest(".p5em-playlist-row");
+      const input = row?.querySelector("[data-input='playlist-url']");
+      if (input) input.value = URL.createObjectURL(file);
+      event.target.value = "";
+    }
   });
+  syncPlaylistRows(panel, playlistConfigFrom(config).items);
   return panel;
 }
 
@@ -680,10 +700,60 @@ function section(title, rows) {
 function toggle(key, label) {
   return `
     <label class="p5em-toggle">
-      <input type="checkbox" data-toggle="${key}">
       <span>${label}</span>
+      <input type="checkbox" data-toggle="${key}">
+      <i aria-hidden="true"></i>
     </label>
   `;
+}
+
+function activatePanelTab(panel, tab) {
+  panel.querySelectorAll("[data-tab]").forEach((button) => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  panel.querySelectorAll("[data-panel]").forEach((section) => {
+    const active = section.dataset.panel === tab;
+    section.classList.toggle("is-active", active);
+    section.hidden = !active;
+  });
+}
+
+function syncPlaylistRows(panel, items) {
+  const container = panel?.querySelector("[data-playlist-rows]");
+  if (!container || container.dataset.editing === "true") return;
+  const urls = normalizePlaylistItems(items).map((item) => typeof item === "string" ? item : item.url);
+  container.innerHTML = "";
+  (urls.length ? urls : [""]).forEach((url) => addPlaylistRow(panel, url));
+}
+
+function addPlaylistRow(panel, value = "") {
+  const container = panel.querySelector("[data-playlist-rows]");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "p5em-playlist-row";
+  row.innerHTML = `
+    <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="./local-sketch/index.html or https://...">
+    <label>
+      <span>Browse</span>
+      <input data-input="playlist-file" type="file" accept=".html,text/html">
+    </label>
+    <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
+  `;
+  row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
+    container.dataset.editing = "true";
+  });
+  row.querySelector("[data-input='playlist-url']").addEventListener("blur", () => {
+    container.dataset.editing = "false";
+  });
+  container.appendChild(row);
+}
+
+function collectPlaylistRows(panel) {
+  return Array.from(panel.querySelectorAll("[data-input='playlist-url']"))
+    .map((input) => input.value.trim())
+    .filter(Boolean);
 }
 
 function injectStyles() {
@@ -777,7 +847,10 @@ function injectStyles() {
       text-transform: uppercase;
     }
     .p5em-panel-header button,
-    .p5em-panel-actions button {
+    .p5em-panel-actions button,
+    .p5em-tabs button,
+    .p5em-playlist-head button,
+    .p5em-playlist-row button {
       color: inherit;
       background: transparent;
       border: 1px solid rgba(255,255,255,0.18);
@@ -790,6 +863,34 @@ function injectStyles() {
       height: 28px;
       font-size: 18px;
       line-height: 1;
+    }
+    .p5em-tabs {
+      display: flex;
+      gap: 7px;
+      flex: 0 0 auto;
+      margin-top: 10px;
+    }
+    .p5em-tabs button {
+      padding: 7px 10px;
+      color: rgba(255,255,255,0.48);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p5em-tabs button.is-active {
+      color: rgba(255,255,255,0.92);
+      border-color: rgba(255,255,255,0.42);
+      background: rgba(255,255,255,0.045);
+    }
+    .p5em-tab-panel {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: none;
+      flex-direction: column;
+    }
+    .p5em-tab-panel.is-active {
+      display: flex;
     }
     .p5em-panel-grid {
       display: grid;
@@ -850,6 +951,13 @@ function injectStyles() {
       flex-direction: column;
       border-top: 1px solid rgba(255,255,255,0.14);
     }
+    .p5em-playlist-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
     .p5em-playlist-editor h2 {
       margin: 0 0 6px;
       color: rgba(255,255,255,0.58);
@@ -858,19 +966,67 @@ function injectStyles() {
       letter-spacing: 0.14em;
       text-transform: uppercase;
     }
-    .p5em-playlist-editor textarea {
-      box-sizing: border-box;
-      width: 100%;
+    .p5em-playlist-head button {
+      width: 26px;
+      height: 24px;
+      line-height: 1;
+      font-size: 13px;
+    }
+    .p5em-playlist-options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px 12px;
+      flex: 0 0 auto;
+      margin: 4px 0 8px;
+    }
+    .p5em-playlist-rows {
       flex: 1 1 auto;
-      min-height: 54px;
-      max-height: 110px;
-      resize: vertical;
-      padding: 8px;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .p5em-playlist-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto 26px;
+      gap: 7px;
+      align-items: center;
+    }
+    .p5em-playlist-row input[type="text"] {
+      min-width: 0;
+      padding: 7px 8px;
       color: rgba(255,255,255,0.9);
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.18);
       border-radius: 0;
-      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .p5em-playlist-row label {
+      position: relative;
+      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 8px;
+      color: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .p5em-playlist-row input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .p5em-playlist-row button {
+      width: 26px;
+      height: 27px;
+      line-height: 1;
     }
     .p5em-playlist-editor p {
       margin: 6px 0 0;
@@ -884,8 +1040,8 @@ function injectStyles() {
     .p5em-number-control {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      justify-content: flex-start;
+      gap: 7px;
       color: rgba(255,255,255,0.7);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -893,9 +1049,35 @@ function injectStyles() {
       text-transform: uppercase;
     }
     .p5em-toggle input {
-      width: 15px;
-      height: 15px;
-      accent-color: #ffffff;
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .p5em-toggle i {
+      position: relative;
+      width: 24px;
+      height: 13px;
+      border: 1px solid rgba(255,255,255,0.24);
+      background: rgba(255,255,255,0.035);
+      flex: 0 0 auto;
+    }
+    .p5em-toggle i::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 7px;
+      height: 7px;
+      background: rgba(255,255,255,0.36);
+      transition: transform 0.18s ease, background 0.18s ease;
+    }
+    .p5em-toggle input:checked + i {
+      border-color: rgba(255,255,255,0.62);
+      background: rgba(255,255,255,0.1);
+    }
+    .p5em-toggle input:checked + i::after {
+      transform: translateX(11px);
+      background: rgba(255,255,255,0.92);
     }
     .p5em-number-control input,
     .p5em-number-control select {
@@ -1007,6 +1189,14 @@ function parsePlaylistText(value) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
+}
+
+function escapeAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function normalizePlaylistItems(items) {

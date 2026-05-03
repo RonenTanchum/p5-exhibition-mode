@@ -23,6 +23,12 @@ This library adds a small production layer around the sketch without changing th
 - FPS, resolution, fullscreen, uptime, reload, and memory diagnostics
 - Screenshot capture
 - Hidden Phenomena-style runtime panel
+- Runtime toggles for touch locks, context menu locks, cursor hiding, playlist mode, and random hash URLs
+- 0 / 90 CW / 90 CCW / 180 rotation for vertical displays and rotated projectors
+- Optional playlist mode for rotating local sketches and live generative URLs
+- Basic watchdog, dropped-frame logging, and optional remote health checks
+- Sensor bridge for manual values, JSON polling, and WebSocket inputs
+- Technical rider template and artwork manifest schema
 - Small ES module with no runtime dependencies
 
 ## Install
@@ -51,6 +57,23 @@ const exhibition = createExhibitionMode({
   disableTouchGestures: true,
   hideCursor: true,
   maxPixelRatio: 2,
+  rotation: 0,
+  watchdog: {
+    enabled: true,
+    minFps: 12,
+    seconds: 30,
+    reload: true
+  },
+  playlist: {
+    enabled: false,
+    intervalSeconds: 120,
+    randomHash: true,
+    hashParam: "hash",
+    items: [
+      "./sketch-a/index.html",
+      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+    ]
+  },
   monitor: true
 });
 
@@ -67,6 +90,68 @@ function draw() {
 ```
 
 Press `Shift + G` to open the diagnostics panel.
+
+## Playlist Mode
+
+Playlist mode can rotate local sketch pages or live artwork URLs inside a managed fullscreen iframe.
+
+```js
+const exhibition = createExhibitionMode({
+  playlist: {
+    enabled: true,
+    intervalSeconds: 180,
+    randomHash: true,
+    hashParam: "hash",
+    items: [
+      "./works/apex-rotation/index.html",
+      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+    ]
+  }
+});
+```
+
+When `randomHash` is enabled, each playlist load receives a new `?hash=` value. This is useful for generative systems that use URL parameters as seeds.
+
+## Rotation
+
+Use rotation for portrait screens, rotated projectors, or unconventional display mounts.
+
+```js
+createExhibitionMode({
+  rotation: 90 // 0, 90, 180, or 270
+});
+```
+
+Rotation can also be changed from the runtime panel.
+
+## Sensor Bridge
+
+The sensor bridge exposes real-world values as simple numeric uniforms for p5.js, Three.js, GLSL, or your own renderer.
+
+```js
+import { createSensorBridge } from "p5-exhibition-mode";
+
+const sensors = createSensorBridge({
+  type: "websocket",
+  url: "ws://localhost:8080",
+  map: (data) => ({
+    presence: data.people ?? 0,
+    temperature: data.temp ?? 0
+  })
+}).start();
+
+function draw() {
+  const presence = sensors.get("presence");
+}
+```
+
+Supported first-pass inputs:
+
+- Manual values
+- JSON polling
+- WebSocket streams
+
+The API is intentionally small so OSC, MIDI, serial, weather, TouchDesigner, and CSV adapters can be added cleanly.
 
 ## p5 Instance Mode
 
@@ -115,6 +200,34 @@ createExhibitionMode({
   cursorIdleMs: 2400,
   idleReset: false,
   maxPixelRatio: 2,
+  rotation: 0,
+  accessibility: {
+    reducedMotion: false,
+    highContrast: false
+  },
+  watchdog: {
+    enabled: false,
+    minFps: 12,
+    seconds: 30,
+    reload: true
+  },
+  logging: {
+    enabled: true,
+    maxEntries: 300
+  },
+  healthCheck: {
+    enabled: false,
+    url: "",
+    intervalSeconds: 60
+  },
+  playlist: {
+    enabled: false,
+    items: [],
+    intervalSeconds: 120,
+    randomHash: false,
+    hashParam: "hash",
+    startIndex: 0
+  },
   monitor: true,
   panel: true,
   panelKey: "g",
@@ -123,6 +236,15 @@ createExhibitionMode({
   onDiagnostics: undefined
 });
 ```
+
+## Institutional Files
+
+The repository also includes:
+
+- `templates/technical-rider.md`
+- `schemas/artwork-manifest.schema.json`
+- `examples/artwork-manifest.example.json`
+- `examples/runtime-config.example.json`
 
 ## Demo
 

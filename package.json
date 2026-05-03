@@ -10,15 +10,22 @@
     ".": {
       "types": "./src/index.d.ts",
       "import": "./src/index.js"
+    },
+    "./sensors": {
+      "types": "./src/index.d.ts",
+      "import": "./src/sensors.js"
     }
   },
   "files": [
     "src",
+    "schemas",
+    "templates",
+    "examples",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check src/index.js",
+    "check": "node --check src/index.js && node --check src/sensors.js",
     "demo": "python3 -m http.server 4177"
   },
   "keywords": [

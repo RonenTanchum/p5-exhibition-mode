@@ -13,8 +13,38 @@ const DEFAULTS = {
   monitor: true,
   panel: true,
   panelKey: "g",
+  rotation: 0,
+  accessibility: {
+    reducedMotion: false,
+    highContrast: false
+  },
+  watchdog: {
+    enabled: false,
+    minFps: 12,
+    seconds: 30,
+    reload: true
+  },
+  logging: {
+    enabled: true,
+    maxEntries: 300
+  },
+  healthCheck: {
+    enabled: false,
+    url: "",
+    intervalSeconds: 60
+  },
+  playlist: {
+    enabled: false,
+    items: [],
+    intervalSeconds: 120,
+    randomHash: false,
+    hashParam: "hash",
+    startIndex: 0
+  },
   target: null
 };
+
+export { createSensorBridge } from "./sensors.js";
 
 const PANEL_ID = "p5-exhibition-mode-panel";
 const STYLE_ID = "p5-exhibition-mode-style";
@@ -31,6 +61,14 @@ export function createExhibitionMode(options = {}) {
     reloadCount: readReloadCount(),
     listeners: [],
     panel: null,
+    playlistFrame: null,
+    playlistEnabled: false,
+    playlistIndex: 0,
+    playlistLastChangeAt: performance.now(),
+    lowFpsSince: null,
+    droppedFrames: 0,
+    logs: [],
+    lastHealthAt: 0,
     raf: null,
     cursorHidden: false
   };
@@ -40,7 +78,11 @@ export function createExhibitionMode(options = {}) {
     installInputLocks();
     installKeyboard();
     installActivityTracking();
+    installRuntimeLogging();
     applyPixelRatio();
+    applyRotation();
+    applyAccessibility();
+    setupPlaylist();
 
     if (config.panel) {
       state.panel = createPanel(config, api);
@@ -66,6 +108,14 @@ export function createExhibitionMode(options = {}) {
     state.fps = average(state.frameSamples);
 
     if (config.hideCursor) updateCursor(now);
+    else if (state.cursorHidden) showCursor();
+    if (delta > 250) {
+      state.droppedFrames += 1;
+      log("warn", `Dropped frame ${Math.round(delta)}ms`);
+    }
+    tickPlaylist(now);
+    tickWatchdog(now);
+    tickHealthCheck(now);
     if (config.idleReset && (now - state.lastActivityAt) / 1000 > config.idleReset) reset();
     if (state.panelOpen) updatePanel();
     return api;
@@ -76,8 +126,10 @@ export function createExhibitionMode(options = {}) {
       target.removeEventListener(type, handler, opts);
     });
     state.listeners = [];
-    document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor");
+    document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor", "p5em-lock-touch");
+    document.documentElement.style.removeProperty("--p5em-rotation");
     state.panel?.remove();
+    state.playlistFrame?.remove();
   }
 
   function reset() {
@@ -133,8 +185,20 @@ export function createExhibitionMode(options = {}) {
       height: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio,
       fullscreen: Boolean(document.fullscreenElement),
+      rotation: normalizeRotation(config.rotation),
       contextMenuLocked: Boolean(config.disableContextMenu),
       touchGesturesLocked: Boolean(config.disableTouchGestures),
+      cursorHiddenEnabled: Boolean(config.hideCursor),
+      reducedMotion: Boolean(accessibilityConfig().reducedMotion),
+      highContrast: Boolean(accessibilityConfig().highContrast),
+      watchdogEnabled: Boolean(watchdogConfig().enabled),
+      droppedFrames: state.droppedFrames,
+      logCount: state.logs.length,
+      playlistEnabled: Boolean(state.playlistEnabled),
+      playlistIndex: state.playlistIndex,
+      playlistCount: playlistItems().length,
+      playlistIntervalSeconds: playlistConfig().intervalSeconds,
+      playlistRandomHash: Boolean(playlistConfig().randomHash),
       reloadCount: state.reloadCount,
       memoryMB: memory
     };
@@ -151,20 +215,20 @@ export function createExhibitionMode(options = {}) {
   }
 
   function installInputLocks() {
-    if (config.disableContextMenu) {
-      add(document, "contextmenu", (event) => event.preventDefault());
-    }
+    updateInputLockClasses();
+    add(document, "contextmenu", (event) => {
+      if (config.disableContextMenu) event.preventDefault();
+    });
 
-    if (config.disableTouchGestures) {
-      document.documentElement.classList.add("p5em-lock-touch");
-      const blockGesture = (event) => event.preventDefault();
-      add(document, "gesturestart", blockGesture, { passive: false });
-      add(document, "gesturechange", blockGesture, { passive: false });
-      add(document, "gestureend", blockGesture, { passive: false });
-      add(document, "touchmove", (event) => {
-        if (!state.panel?.contains(event.target)) event.preventDefault();
-      }, { passive: false });
-    }
+    const blockGesture = (event) => {
+      if (config.disableTouchGestures) event.preventDefault();
+    };
+    add(document, "gesturestart", blockGesture, { passive: false });
+    add(document, "gesturechange", blockGesture, { passive: false });
+    add(document, "gestureend", blockGesture, { passive: false });
+    add(document, "touchmove", (event) => {
+      if (config.disableTouchGestures && !state.panel?.contains(event.target)) event.preventDefault();
+    }, { passive: false });
 
     if (config.preventScroll) {
       const blockScrollKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " "]);
@@ -204,6 +268,187 @@ export function createExhibitionMode(options = {}) {
     }
   }
 
+  function showCursor() {
+    state.cursorHidden = false;
+    document.documentElement.classList.remove("p5em-hide-cursor");
+  }
+
+  function updateInputLockClasses() {
+    document.documentElement.classList.toggle("p5em-lock-touch", Boolean(config.disableTouchGestures));
+  }
+
+  function setOption(key, value) {
+    config[key] = value;
+    if (key === "disableTouchGestures") updateInputLockClasses();
+    if (key === "hideCursor" && !value) showCursor();
+    if (key === "rotation") applyRotation();
+    updatePanel();
+    return api;
+  }
+
+  function setRotation(degrees) {
+    config.rotation = normalizeRotation(degrees);
+    applyRotation();
+    updatePanel();
+    return api;
+  }
+
+  function setAccessibility(next = {}) {
+    config.accessibility = { ...accessibilityConfig(), ...next };
+    applyAccessibility();
+    updatePanel();
+    return api;
+  }
+
+  function applyRotation() {
+    document.documentElement.style.setProperty("--p5em-rotation", `${normalizeRotation(config.rotation)}deg`);
+  }
+
+  function applyAccessibility() {
+    const a = accessibilityConfig();
+    document.documentElement.classList.toggle("p5em-reduced-motion", Boolean(a.reducedMotion));
+    document.documentElement.classList.toggle("p5em-high-contrast", Boolean(a.highContrast));
+  }
+
+  function setupPlaylist() {
+    const playlist = playlistConfig();
+    state.playlistEnabled = Boolean(playlist.enabled && playlistItems().length);
+    state.playlistIndex = Math.max(0, playlist.startIndex || 0) % Math.max(1, playlistItems().length);
+    if (!playlistItems().length) return;
+
+    state.playlistFrame = document.createElement("iframe");
+    state.playlistFrame.className = "p5em-playlist-frame";
+    state.playlistFrame.title = "Exhibition playlist artwork";
+    state.playlistFrame.setAttribute("allow", "autoplay; fullscreen");
+    state.playlistFrame.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+    state.playlistFrame.hidden = !state.playlistEnabled;
+    document.body.prepend(state.playlistFrame);
+
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+  }
+
+  function tickPlaylist(now) {
+    if (!state.playlistEnabled || !state.playlistFrame) return;
+    const interval = Math.max(5, Number(playlistConfig().intervalSeconds) || 120) * 1000;
+    if (now - state.playlistLastChangeAt >= interval) nextPlaylistItem();
+  }
+
+  function playlistConfig() {
+    if (Array.isArray(config.playlist)) return { ...DEFAULTS.playlist, enabled: true, items: config.playlist };
+    return { ...DEFAULTS.playlist, ...(config.playlist || {}) };
+  }
+
+  function accessibilityConfig() {
+    return { ...DEFAULTS.accessibility, ...(config.accessibility || {}) };
+  }
+
+  function watchdogConfig() {
+    return { ...DEFAULTS.watchdog, ...(config.watchdog || {}) };
+  }
+
+  function loggingConfig() {
+    return { ...DEFAULTS.logging, ...(config.logging || {}) };
+  }
+
+  function healthCheckConfig() {
+    return { ...DEFAULTS.healthCheck, ...(config.healthCheck || {}) };
+  }
+
+  function playlistItems() {
+    return playlistConfig().items.filter(Boolean);
+  }
+
+  function loadPlaylistItem(index = state.playlistIndex) {
+    const items = playlistItems();
+    if (!items.length || !state.playlistFrame) return null;
+    state.playlistIndex = ((index % items.length) + items.length) % items.length;
+    state.playlistLastChangeAt = performance.now();
+    const url = buildPlaylistUrl(items[state.playlistIndex], playlistConfig());
+    state.playlistFrame.src = url;
+    state.playlistFrame.hidden = false;
+    updatePanel();
+    return url;
+  }
+
+  function nextPlaylistItem() {
+    return loadPlaylistItem(state.playlistIndex + 1);
+  }
+
+  function previousPlaylistItem() {
+    return loadPlaylistItem(state.playlistIndex - 1);
+  }
+
+  function togglePlaylist(force) {
+    state.playlistEnabled = typeof force === "boolean" ? force : !state.playlistEnabled;
+    if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    updatePanel();
+    return api;
+  }
+
+  function setPlaylistInterval(seconds) {
+    config.playlist = { ...playlistConfig(), intervalSeconds: Math.max(5, Number(seconds) || 120) };
+    state.playlistLastChangeAt = performance.now();
+    updatePanel();
+    return api;
+  }
+
+  function setPlaylistRandomHash(value) {
+    config.playlist = { ...playlistConfig(), randomHash: Boolean(value) };
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    updatePanel();
+    return api;
+  }
+
+  function tickWatchdog(now) {
+    const watchdog = watchdogConfig();
+    if (!watchdog.enabled || state.fps <= 0) return;
+    if (state.fps >= watchdog.minFps) {
+      state.lowFpsSince = null;
+      return;
+    }
+    state.lowFpsSince ??= now;
+    if ((now - state.lowFpsSince) / 1000 >= watchdog.seconds) {
+      log("error", `Watchdog triggered below ${watchdog.minFps} FPS`);
+      if (watchdog.reload) reset();
+    }
+  }
+
+  function tickHealthCheck(now) {
+    const health = healthCheckConfig();
+    if (!health.enabled || !health.url) return;
+    const interval = Math.max(10, Number(health.intervalSeconds) || 60) * 1000;
+    if (now - state.lastHealthAt < interval) return;
+    state.lastHealthAt = now;
+    const payload = JSON.stringify(diagnostics());
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(health.url, new Blob([payload], { type: "application/json" }));
+    } else {
+      fetch(health.url, { method: "POST", body: payload, keepalive: true, mode: "no-cors" }).catch(() => {});
+    }
+  }
+
+  function installRuntimeLogging() {
+    add(window, "error", (event) => log("error", event.message || "Runtime error"));
+    add(window, "unhandledrejection", (event) => log("error", event.reason?.message || "Unhandled promise rejection"));
+    add(document, "webglcontextlost", (event) => {
+      log("error", "WebGL context lost");
+      event.preventDefault();
+    }, { capture: true });
+  }
+
+  function log(level, message, detail = null) {
+    if (!loggingConfig().enabled) return;
+    state.logs.push({
+      time: new Date().toISOString(),
+      level,
+      message,
+      detail
+    });
+    const max = Math.max(20, Number(loggingConfig().maxEntries) || 300);
+    if (state.logs.length > max) state.logs.splice(0, state.logs.length - max);
+  }
+
   function maybeEnterFullscreen() {
     if (config.fullscreen) enterFullscreen();
   }
@@ -218,16 +463,42 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-dpr", d.devicePixelRatio.toFixed(2));
     setText("p5em-fps", d.fps.toFixed(1));
     setText("p5em-fullscreen", d.fullscreen ? "Active" : "Inactive");
+    setText("p5em-rotation", `${d.rotation}deg`);
     setText("p5em-context", d.contextMenuLocked ? "Disabled" : "Allowed");
     setText("p5em-touch", d.touchGesturesLocked ? "Disabled" : "Allowed");
+    setText("p5em-cursor", d.cursorHiddenEnabled ? "Enabled" : "Disabled");
+    setText("p5em-motion", d.reducedMotion ? "Reduced" : "Normal");
+    setText("p5em-contrast", d.highContrast ? "High" : "Normal");
+    setText("p5em-watchdog", d.watchdogEnabled ? "Enabled" : "Disabled");
+    setText("p5em-dropped", String(d.droppedFrames));
+    setText("p5em-logs", String(d.logCount));
+    setText("p5em-playlist", d.playlistEnabled ? `${d.playlistIndex + 1} / ${d.playlistCount}` : "Inactive");
+    setText("p5em-playlist-interval", `${d.playlistIntervalSeconds}s`);
+    setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
     setText("p5em-reloads", String(d.reloadCount));
+    setChecked("context", d.contextMenuLocked);
+    setChecked("touch", d.touchGesturesLocked);
+    setChecked("cursor", d.cursorHiddenEnabled);
+    setChecked("playlist", d.playlistEnabled);
+    setChecked("playlist-hash", d.playlistRandomHash);
+    setChecked("reduced-motion", d.reducedMotion);
+    setChecked("high-contrast", d.highContrast);
+    const interval = state.panel.querySelector("[data-input='playlist-interval']");
+    if (interval && document.activeElement !== interval) interval.value = d.playlistIntervalSeconds;
+    const rotation = state.panel.querySelector("[data-input='rotation']");
+    if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
   }
 
   function setText(key, value) {
     const el = state.panel?.querySelector(`[data-p5em="${key}"]`);
     if (el) el.textContent = value;
+  }
+
+  function setChecked(key, value) {
+    const el = state.panel?.querySelector(`[data-toggle="${key}"]`);
+    if (el) el.checked = Boolean(value);
   }
 
   function add(target, type, handler, opts) {
@@ -245,7 +516,15 @@ export function createExhibitionMode(options = {}) {
     exitFullscreen,
     screenshot,
     diagnostics,
-    applyPixelRatio
+    applyPixelRatio,
+    setOption,
+    setRotation,
+    setAccessibility,
+    togglePlaylist,
+    nextPlaylistItem,
+    previousPlaylistItem,
+    setPlaylistInterval,
+    setPlaylistRandomHash
   };
 
   return api;
@@ -263,15 +542,40 @@ function createPanel(config, api) {
     </div>
     <div class="p5em-panel-grid">
       ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Seed", "p5em-seed"]])}
-      ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"]])}
-      ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"]])}
-      ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"]])}
+      ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
+      ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
+      ${section("Playlist", [["Status", "p5em-playlist"], ["Interval", "p5em-playlist-interval"], ["Random Hash", "p5em-playlist-hash"]])}
+      ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
+    </div>
+    <div class="p5em-panel-controls">
+      ${toggle("context", "Context menu lock")}
+      ${toggle("touch", "Touch gestures lock")}
+      ${toggle("cursor", "Hide cursor")}
+      ${toggle("reduced-motion", "Reduced motion")}
+      ${toggle("high-contrast", "High contrast")}
+      ${toggle("playlist", "Playlist mode")}
+      ${toggle("playlist-hash", "Random ?hash=")}
+      <label class="p5em-number-control">
+        <span>Interval</span>
+        <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
+      </label>
+      <label class="p5em-number-control">
+        <span>Rotate</span>
+        <select data-input="rotation">
+          <option value="0">0</option>
+          <option value="90">90 CW</option>
+          <option value="270">90 CCW</option>
+          <option value="180">180</option>
+        </select>
+      </label>
     </div>
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
       <button type="button" data-action="screenshot">Screenshot</button>
       <button type="button" data-action="diagnostics">Diagnostics</button>
+      <button type="button" data-action="playlist-prev">Prev URL</button>
+      <button type="button" data-action="playlist-next">Next URL</button>
     </div>
     <p class="p5em-panel-hint">Shift + ${config.panelKey.toUpperCase()} toggles this panel.</p>
   `;
@@ -283,8 +587,32 @@ function createPanel(config, api) {
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
+    if (action === "playlist-prev") api.previousPlaylistItem();
+    if (action === "playlist-next") api.nextPlaylistItem();
+  });
+  panel.addEventListener("change", (event) => {
+    const toggle = event.target?.dataset?.toggle;
+    if (toggle === "context") api.setOption("disableContextMenu", event.target.checked);
+    if (toggle === "touch") api.setOption("disableTouchGestures", event.target.checked);
+    if (toggle === "cursor") api.setOption("hideCursor", event.target.checked);
+    if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
+    if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
+    if (toggle === "playlist") api.togglePlaylist(event.target.checked);
+    if (toggle === "playlist-hash") api.setPlaylistRandomHash(event.target.checked);
+
+    if (event.target?.dataset?.input === "playlist-interval") {
+      api.setPlaylistInterval(event.target.value);
+    }
+    if (event.target?.dataset?.input === "rotation") {
+      api.setRotation(event.target.value);
+    }
   });
   return panel;
+}
+
+function playlistConfigFrom(config) {
+  if (Array.isArray(config.playlist)) return { ...DEFAULTS.playlist, enabled: true, items: config.playlist };
+  return { ...DEFAULTS.playlist, ...(config.playlist || {}) };
 }
 
 function section(title, rows) {
@@ -293,6 +621,15 @@ function section(title, rows) {
       <h2>${title}</h2>
       ${rows.map(([label, key]) => `<div><span>${label}</span><strong data-p5em="${key}"></strong></div>`).join("")}
     </section>
+  `;
+}
+
+function toggle(key, label) {
+  return `
+    <label class="p5em-toggle">
+      <input type="checkbox" data-toggle="${key}">
+      <span>${label}</span>
+    </label>
   `;
 }
 
@@ -307,7 +644,8 @@ function injectStyles() {
     }
     .p5em-lock-touch,
     .p5em-lock-touch body,
-    .p5em-lock-touch canvas {
+    .p5em-lock-touch canvas,
+    .p5em-lock-touch iframe {
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
@@ -316,6 +654,38 @@ function injectStyles() {
     .p5em-hide-cursor,
     .p5em-hide-cursor * {
       cursor: none !important;
+    }
+    .p5em-reduced-motion *,
+    .p5em-reduced-motion *::before,
+    .p5em-reduced-motion *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.001ms !important;
+    }
+    .p5em-high-contrast canvas,
+    .p5em-high-contrast iframe {
+      filter: contrast(1.2) saturate(0.9);
+    }
+    .p5em-playlist-frame {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      width: 100vw;
+      height: 100vh;
+      border: 0;
+      background: #050505;
+      transform: rotate(var(--p5em-rotation, 0deg));
+      transform-origin: center center;
+    }
+    .p5em-playlist-frame[hidden] {
+      display: none;
+    }
+    body > canvas {
+      position: relative;
+      z-index: 1;
+      transform: rotate(var(--p5em-rotation, 0deg));
+      transform-origin: center center;
     }
     #${PANEL_ID} {
       position: fixed;
@@ -403,6 +773,42 @@ function injectStyles() {
       gap: 8px;
       margin-top: 18px;
     }
+    .p5em-panel-controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 14px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-toggle,
+    .p5em-number-control {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: rgba(255,255,255,0.7);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .p5em-toggle input {
+      width: 15px;
+      height: 15px;
+      accent-color: #ffffff;
+    }
+    .p5em-number-control input,
+    .p5em-number-control select {
+      width: 64px;
+      padding: 6px 7px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 0;
+      font: inherit;
+      text-align: right;
+    }
     .p5em-panel-actions button {
       padding: 9px 11px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -426,6 +832,9 @@ function injectStyles() {
         width: auto;
       }
       .p5em-panel-grid {
+        grid-template-columns: 1fr;
+      }
+      .p5em-panel-controls {
         grid-template-columns: 1fr;
       }
     }
@@ -467,4 +876,31 @@ async function copyDiagnostics(data) {
   const text = JSON.stringify(data, null, 2);
   if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text).catch(() => {});
   else console.info("p5 Exhibition Mode diagnostics", data);
+}
+
+function buildPlaylistUrl(input, playlist) {
+  const item = typeof input === "string" ? { url: input } : input;
+  let url = item.url || "";
+  const randomHash = item.randomHash ?? playlist.randomHash;
+  const hashParam = item.hashParam || playlist.hashParam || "hash";
+  if (!randomHash) return url;
+
+  const value = randomHashValue();
+  const [base, fragment] = url.split("#");
+  const separator = base.includes("?") ? "&" : "?";
+  const nextBase = `${base}${separator}${encodeURIComponent(hashParam)}=${encodeURIComponent(value)}`;
+  return fragment === undefined ? nextBase : `${nextBase}#${fragment}`;
+}
+
+function randomHashValue() {
+  const bytes = new Uint32Array(2);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("");
+}
+
+function normalizeRotation(value) {
+  const degrees = Number(value) || 0;
+  const normalized = ((degrees % 360) + 360) % 360;
+  if (normalized === 90 || normalized === 180 || normalized === 270) return normalized;
+  return 0;
 }

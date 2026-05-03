@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phenomenalabs.com/schemas/generative-artwork-manifest.json",
+  "title": "Generative Artwork Manifest",
+  "type": "object",
+  "required": ["title", "artist", "year", "medium", "runtime"],
+  "properties": {
+    "title": { "type": "string" },
+    "artist": { "type": "string" },
+    "studio": { "type": "string" },
+    "year": { "type": ["string", "number"] },
+    "edition": { "type": "string" },
+    "medium": { "type": "string" },
+    "runtime": { "type": "string" },
+    "description": { "type": "string" },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "inputSources": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "resolution": { "type": "string" },
+        "orientation": { "type": "string" },
+        "rotation": { "enum": [0, 90, 180, 270] },
+        "aspectRatio": { "type": "string" }
+      }
+    },
+    "installation": {
+      "type": "object",
+      "properties": {
+        "hardware": { "type": "array", "items": { "type": "string" } },
+        "network": { "type": "string" },
+        "startup": { "type": "string" },
+        "maintenance": { "type": "string" }
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "rights": {
+      "type": "object",
+      "properties": {
+        "image": { "type": "string" },
+        "press": { "type": "string" },
+        "collector": { "type": "string" }
+      }
+    },
+    "archivalAssets": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

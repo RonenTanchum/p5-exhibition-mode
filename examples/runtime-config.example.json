@@ -1,0 +1,31 @@
+{
+  "title": "Field Study",
+  "artist": "Phenomena Labs",
+  "fullscreen": true,
+  "rotation": 0,
+  "disableContextMenu": true,
+  "disableTouchGestures": true,
+  "hideCursor": true,
+  "maxPixelRatio": 2,
+  "watchdog": {
+    "enabled": true,
+    "minFps": 12,
+    "seconds": 30,
+    "reload": true
+  },
+  "healthCheck": {
+    "enabled": false,
+    "url": "https://example.com/health",
+    "intervalSeconds": 60
+  },
+  "playlist": {
+    "enabled": false,
+    "intervalSeconds": 120,
+    "randomHash": true,
+    "hashParam": "hash",
+    "items": [
+      "./demo/index.html",
+      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+    ]
+  }
+}

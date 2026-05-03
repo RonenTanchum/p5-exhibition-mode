@@ -1,0 +1,31 @@
+{
+  "title": "Field Study",
+  "artist": "Phenomena Labs",
+  "studio": "Phenomena Labs",
+  "year": 2026,
+  "edition": "Open study",
+  "medium": "Real-time generative software, p5.js, browser runtime",
+  "runtime": "Continuous loop",
+  "description": "A fullscreen generative field prepared for public exhibition runtime testing.",
+  "dependencies": ["p5.js", "p5-exhibition-mode"],
+  "inputSources": ["manual", "playlist"],
+  "display": {
+    "resolution": "1920x1080",
+    "orientation": "landscape",
+    "rotation": 0,
+    "aspectRatio": "16:9"
+  },
+  "installation": {
+    "hardware": ["Mac mini or equivalent", "HDMI display"],
+    "network": "Optional after initial load",
+    "startup": "Open demo/index.html and click once for fullscreen",
+    "maintenance": "Use Shift + G to inspect runtime status"
+  },
+  "provenance": ["Phenomena Labs runtime demo"],
+  "rights": {
+    "image": "Courtesy of Phenomena Labs",
+    "press": "Contact studio before publication",
+    "collector": "Not editioned"
+  },
+  "archivalAssets": ["README.md", "demo/index.html", "demo/sketch.js"]
+}

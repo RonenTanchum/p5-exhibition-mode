@@ -5,7 +5,17 @@ const exhibition = createExhibitionMode({
   artist: "Phenomena Labs",
   seed: 1842,
   maxPixelRatio: 1.5,
-  idleReset: false
+  idleReset: false,
+  playlist: {
+    enabled: false,
+    intervalSeconds: 20,
+    randomHash: true,
+    hashParam: "hash",
+    items: [
+      "./index.html",
+      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+    ]
+  }
 });
 
 const note = document.getElementById("demo-note");

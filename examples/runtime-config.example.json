@@ -2,10 +2,12 @@
   "title": "Field Study",
   "artist": "Phenomena Labs",
   "fullscreen": true,
+  "kiosk": true,
   "rotation": 0,
   "disableContextMenu": true,
   "disableTouchGestures": true,
-  "hideCursor": true,
+  "hideCursor": false,
+  "hideCursorMode": "always",
   "maxPixelRatio": 2,
   "watchdog": {
     "enabled": true,
@@ -20,6 +22,8 @@
   },
   "playlist": {
     "enabled": false,
+    "intervalValue": 2,
+    "intervalUnit": "minutes",
     "intervalSeconds": 120,
     "randomHash": true,
     "hashParam": "hash",

@@ -3,10 +3,12 @@ export type ExhibitionModeOptions = {
   artist?: string;
   seed?: string | number | null;
   fullscreen?: boolean;
+  kiosk?: boolean;
   disableContextMenu?: boolean;
   disableTouchGestures?: boolean;
   preventScroll?: boolean;
   hideCursor?: boolean;
+  hideCursorMode?: "always" | "idle";
   cursorIdleMs?: number;
   idleReset?: number | false;
   maxPixelRatio?: number | false;
@@ -87,6 +89,7 @@ export type ExhibitionDiagnostics = {
   playlistIndex: number;
   playlistCount: number;
   playlistIntervalSeconds: number;
+  playlistIntervalUnit: "seconds" | "minutes" | "hours";
   playlistRandomHash: boolean;
   reloadCount: number;
   memoryMB: number | null;
@@ -111,6 +114,7 @@ export type ExhibitionMode = {
   nextPlaylistItem: () => string | null;
   previousPlaylistItem: () => string | null;
   setPlaylistInterval: (seconds: number | string) => ExhibitionMode;
+  setPlaylistIntervalParts: (value: number | string, unit: "seconds" | "minutes" | "hours") => ExhibitionMode;
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
 };

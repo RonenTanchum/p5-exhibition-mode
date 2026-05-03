@@ -55,9 +55,11 @@ const exhibition = createExhibitionMode({
   artist: "Phenomena Labs",
   seed: 1842,
   fullscreen: true,
+  kiosk: true,
   disableContextMenu: true,
   disableTouchGestures: true,
-  hideCursor: true,
+  hideCursor: false,
+  hideCursorMode: "always",
   maxPixelRatio: 2,
   rotation: 0,
   refreshOnRotation: true,
@@ -69,6 +71,8 @@ const exhibition = createExhibitionMode({
   },
   playlist: {
     enabled: false,
+    intervalValue: 2,
+    intervalUnit: "minutes",
     intervalSeconds: 120,
     randomHash: true,
     hashParam: "hash",
@@ -102,6 +106,8 @@ Playlist mode can rotate local sketch pages or live artwork URLs inside a manage
 const exhibition = createExhibitionMode({
   playlist: {
     enabled: true,
+    intervalValue: 3,
+    intervalUnit: "minutes",
     intervalSeconds: 180,
     randomHash: true,
     hashParam: "hash",
@@ -124,6 +130,7 @@ You can also edit the playlist directly inside the runtime panel:
 5. Use **Browse** for a temporary local `.html` file preview.
 6. Click **Apply URLs**.
 7. Enable **Playlist Mode**.
+8. Set **Playlist Interval** using seconds, minutes, or hours.
 
 Valid playlist entries:
 
@@ -277,10 +284,12 @@ createExhibitionMode({
   artist: "",
   seed: null,
   fullscreen: true,
+  kiosk: true,
   disableContextMenu: true,
   disableTouchGestures: true,
   preventScroll: true,
-  hideCursor: true,
+  hideCursor: false,
+  hideCursorMode: "always",
   cursorIdleMs: 2400,
   idleReset: false,
   maxPixelRatio: 2,
@@ -308,6 +317,8 @@ createExhibitionMode({
   playlist: {
     enabled: false,
     items: [],
+    intervalValue: 2,
+    intervalUnit: "minutes",
     intervalSeconds: 120,
     randomHash: false,
     hashParam: "hash",

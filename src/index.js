@@ -3,10 +3,12 @@ const DEFAULTS = {
   artist: "",
   seed: null,
   fullscreen: true,
+  kiosk: true,
   disableContextMenu: true,
   disableTouchGestures: true,
   preventScroll: true,
-  hideCursor: true,
+  hideCursor: false,
+  hideCursorMode: "always",
   cursorIdleMs: 2400,
   idleReset: false,
   maxPixelRatio: 2,
@@ -38,6 +40,7 @@ const DEFAULTS = {
     enabled: false,
     items: [],
     intervalSeconds: 120,
+    intervalUnit: "seconds",
     randomHash: false,
     hashParam: "hash",
     startIndex: 0
@@ -83,6 +86,8 @@ export function createExhibitionMode(options = {}) {
     applyPixelRatio();
     applyRotation();
     applyAccessibility();
+    applyKioskMode();
+    applyCursorMode();
     setupPlaylist();
 
     if (config.panel) {
@@ -127,7 +132,7 @@ export function createExhibitionMode(options = {}) {
       target.removeEventListener(type, handler, opts);
     });
     state.listeners = [];
-    document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor", "p5em-lock-touch");
+    document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor", "p5em-lock-touch", "p5em-kiosk");
     document.documentElement.style.removeProperty("--p5em-rotation");
     state.panel?.remove();
     state.playlistFrame?.remove();
@@ -187,6 +192,7 @@ export function createExhibitionMode(options = {}) {
       height: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio,
       fullscreen: Boolean(document.fullscreenElement),
+      kiosk: Boolean(config.kiosk),
       rotation: normalizeRotation(config.rotation),
       contextMenuLocked: Boolean(config.disableContextMenu),
       touchGesturesLocked: Boolean(config.disableTouchGestures),
@@ -199,7 +205,8 @@ export function createExhibitionMode(options = {}) {
       playlistEnabled: Boolean(state.playlistEnabled),
       playlistIndex: state.playlistIndex,
       playlistCount: playlistItems().length,
-      playlistIntervalSeconds: playlistConfig().intervalSeconds,
+      playlistIntervalSeconds: playlistIntervalSeconds(),
+      playlistIntervalUnit: playlistConfig().intervalUnit,
       playlistRandomHash: Boolean(playlistConfig().randomHash),
       reloadCount: state.reloadCount,
       memoryMB: memory
@@ -218,9 +225,11 @@ export function createExhibitionMode(options = {}) {
 
   function installInputLocks() {
     updateInputLockClasses();
-    add(document, "contextmenu", (event) => {
+    const blockContextMenu = (event) => {
       if (config.disableContextMenu) event.preventDefault();
-    });
+    };
+    add(window, "contextmenu", blockContextMenu, { capture: true });
+    add(document, "contextmenu", blockContextMenu, { capture: true });
 
     const blockGesture = (event) => {
       if (config.disableTouchGestures) event.preventDefault();
@@ -254,7 +263,7 @@ export function createExhibitionMode(options = {}) {
   function installActivityTracking() {
     const mark = () => {
       state.lastActivityAt = performance.now();
-      if (state.cursorHidden) {
+      if (state.cursorHidden && config.hideCursorMode !== "always") {
         state.cursorHidden = false;
         document.documentElement.classList.remove("p5em-hide-cursor");
       }
@@ -263,7 +272,9 @@ export function createExhibitionMode(options = {}) {
   }
 
   function updateCursor(now) {
-    const shouldHide = now - state.lastActivityAt > config.cursorIdleMs && !state.panelOpen;
+    const shouldHide = config.hideCursorMode === "always"
+      ? true
+      : now - state.lastActivityAt > config.cursorIdleMs && !state.panelOpen;
     if (shouldHide !== state.cursorHidden) {
       state.cursorHidden = shouldHide;
       document.documentElement.classList.toggle("p5em-hide-cursor", shouldHide);
@@ -279,10 +290,20 @@ export function createExhibitionMode(options = {}) {
     document.documentElement.classList.toggle("p5em-lock-touch", Boolean(config.disableTouchGestures));
   }
 
+  function applyKioskMode() {
+    document.documentElement.classList.toggle("p5em-kiosk", Boolean(config.kiosk));
+  }
+
+  function applyCursorMode() {
+    document.documentElement.classList.toggle("p5em-hide-cursor", Boolean(config.hideCursor && config.hideCursorMode === "always"));
+    state.cursorHidden = Boolean(config.hideCursor && config.hideCursorMode === "always");
+  }
+
   function setOption(key, value) {
     config[key] = value;
     if (key === "disableTouchGestures") updateInputLockClasses();
-    if (key === "hideCursor" && !value) showCursor();
+    if (key === "hideCursor") value ? applyCursorMode() : showCursor();
+    if (key === "kiosk") applyKioskMode();
     if (key === "rotation") {
       applyRotation();
       if (config.refreshOnRotation) refreshArtwork("rotation");
@@ -348,7 +369,7 @@ export function createExhibitionMode(options = {}) {
 
   function tickPlaylist(now) {
     if (!state.playlistEnabled || !state.playlistFrame) return;
-    const interval = Math.max(5, Number(playlistConfig().intervalSeconds) || 120) * 1000;
+    const interval = playlistIntervalSeconds() * 1000;
     if (now - state.playlistLastChangeAt >= interval) nextPlaylistItem();
   }
 
@@ -375,6 +396,12 @@ export function createExhibitionMode(options = {}) {
 
   function playlistItems() {
     return playlistConfig().items.filter(Boolean);
+  }
+
+  function playlistIntervalSeconds() {
+    const playlist = playlistConfig();
+    if (playlist.intervalUnit) return intervalToSeconds(playlist.intervalValue ?? playlist.intervalSeconds, playlist.intervalUnit);
+    return Math.max(5, Number(playlist.intervalSeconds) || 120);
   }
 
   function loadPlaylistItem(index = state.playlistIndex) {
@@ -406,7 +433,21 @@ export function createExhibitionMode(options = {}) {
   }
 
   function setPlaylistInterval(seconds) {
-    config.playlist = { ...playlistConfig(), intervalSeconds: Math.max(5, Number(seconds) || 120) };
+    config.playlist = { ...playlistConfig(), intervalSeconds: Math.max(5, Number(seconds) || 120), intervalUnit: "seconds" };
+    state.playlistLastChangeAt = performance.now();
+    updatePanel();
+    return api;
+  }
+
+  function setPlaylistIntervalParts(value, unit) {
+    const normalizedUnit = normalizeIntervalUnit(unit);
+    const intervalValue = Math.max(1, Number(value) || 1);
+    config.playlist = {
+      ...playlistConfig(),
+      intervalValue,
+      intervalUnit: normalizedUnit,
+      intervalSeconds: intervalToSeconds(intervalValue, normalizedUnit)
+    };
     state.playlistLastChangeAt = performance.now();
     updatePanel();
     return api;
@@ -510,7 +551,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-dropped", String(d.droppedFrames));
     setText("p5em-logs", String(d.logCount));
     setText("p5em-playlist", d.playlistEnabled ? `${d.playlistIndex + 1} / ${d.playlistCount}` : "Inactive");
-    setText("p5em-playlist-interval", `${d.playlistIntervalSeconds}s`);
+    setText("p5em-playlist-interval", formatInterval(d.playlistIntervalSeconds));
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
@@ -523,7 +564,9 @@ export function createExhibitionMode(options = {}) {
     setChecked("reduced-motion", d.reducedMotion);
     setChecked("high-contrast", d.highContrast);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
-    if (interval && document.activeElement !== interval) interval.value = d.playlistIntervalSeconds;
+    if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
+    const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
+    if (intervalUnit && document.activeElement !== intervalUnit) intervalUnit.value = normalizeIntervalUnit(playlistConfig().intervalUnit);
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
   }
@@ -562,6 +605,7 @@ export function createExhibitionMode(options = {}) {
     nextPlaylistItem,
     previousPlaylistItem,
     setPlaylistInterval,
+    setPlaylistIntervalParts,
     setPlaylistRandomHash,
     setPlaylistItems
   };
@@ -618,8 +662,16 @@ function createPanel(config, api) {
           ${toggle("playlist", "Playlist mode")}
           ${toggle("playlist-hash", "Random ?hash=")}
           <label class="p5em-number-control">
-            <span>Interval</span>
+            <span>Playlist Interval</span>
             <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
+          </label>
+          <label class="p5em-number-control">
+            <span>Unit</span>
+            <select data-input="playlist-interval-unit">
+              <option value="seconds">Seconds</option>
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+            </select>
           </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
@@ -674,7 +726,12 @@ function createPanel(config, api) {
     if (toggle === "playlist-hash") api.setPlaylistRandomHash(event.target.checked);
 
     if (event.target?.dataset?.input === "playlist-interval") {
-      api.setPlaylistInterval(event.target.value);
+      const unit = panel.querySelector("[data-input='playlist-interval-unit']")?.value || "seconds";
+      api.setPlaylistIntervalParts(event.target.value, unit);
+    }
+    if (event.target?.dataset?.input === "playlist-interval-unit") {
+      const value = panel.querySelector("[data-input='playlist-interval']")?.value || 1;
+      api.setPlaylistIntervalParts(value, event.target.value);
     }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
@@ -782,6 +839,14 @@ function injectStyles() {
       background: #050505;
       overscroll-behavior: none;
     }
+    .p5em-kiosk,
+    .p5em-kiosk body {
+      overflow: hidden !important;
+      overscroll-behavior: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-touch-callout: none !important;
+    }
     .p5em-lock-touch,
     .p5em-lock-touch body,
     .p5em-lock-touch canvas,
@@ -792,8 +857,17 @@ function injectStyles() {
       -webkit-touch-callout: none;
     }
     .p5em-hide-cursor,
-    .p5em-hide-cursor * {
+    .p5em-hide-cursor *,
+    .p5em-hide-cursor body,
+    .p5em-hide-cursor canvas,
+    .p5em-hide-cursor iframe,
+    .p5em-hide-cursor body > canvas,
+    .p5em-hide-cursor .p5em-playlist-frame {
       cursor: none !important;
+    }
+    .p5em-hide-cursor #${PANEL_ID},
+    .p5em-hide-cursor #${PANEL_ID} * {
+      cursor: auto !important;
     }
     .p5em-reduced-motion *,
     .p5em-reduced-motion *::before,
@@ -820,6 +894,9 @@ function injectStyles() {
     }
     .p5em-playlist-frame[hidden] {
       display: none;
+    }
+    .p5em-kiosk .p5em-playlist-frame {
+      pointer-events: none;
     }
     body > canvas {
       position: relative;
@@ -1239,4 +1316,30 @@ function normalizeRotation(value) {
   const normalized = ((degrees % 360) + 360) % 360;
   if (normalized === 90 || normalized === 180 || normalized === 270) return normalized;
   return 0;
+}
+
+function normalizeIntervalUnit(unit) {
+  if (unit === "minutes" || unit === "hours") return unit;
+  return "seconds";
+}
+
+function intervalToSeconds(value, unit) {
+  const amount = Math.max(1, Number(value) || 1);
+  const normalized = normalizeIntervalUnit(unit);
+  if (normalized === "hours") return Math.max(5, Math.round(amount * 3600));
+  if (normalized === "minutes") return Math.max(5, Math.round(amount * 60));
+  return Math.max(5, Math.round(amount));
+}
+
+function intervalDisplayValue(seconds, unit) {
+  const normalized = normalizeIntervalUnit(unit);
+  if (normalized === "hours") return Math.max(1, Math.round(seconds / 3600));
+  if (normalized === "minutes") return Math.max(1, Math.round(seconds / 60));
+  return Math.max(5, Math.round(seconds));
+}
+
+function formatInterval(seconds) {
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
 }

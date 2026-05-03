@@ -1341,7 +1341,7 @@ function createPanel(config, api) {
           </label>
           <label class="p5em-text-control p5em-wide-control">
             <span>Free Text</span>
-            <input data-input="free-text" type="text" value="${escapeAttr(config.freeText)}" placeholder="Description, caption, venue note...">
+            <textarea data-input="free-text" rows="5" placeholder="Description, caption, venue note...">${escapeHtml(config.freeText)}</textarea>
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide p5em-compact-group">
@@ -2477,7 +2477,8 @@ function injectStyles() {
       letter-spacing: 0.12em;
       text-transform: uppercase;
     }
-    .p5em-text-control input {
+    .p5em-text-control input,
+    .p5em-text-control textarea {
       min-width: 0;
       padding: 7px 8px;
       color: rgba(255,255,255,0.9);
@@ -2485,6 +2486,12 @@ function injectStyles() {
       border: 1px solid rgba(255,255,255,0.18);
       border-radius: 0;
       font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .p5em-text-control textarea {
+      min-height: 84px;
+      resize: vertical;
+      text-transform: none;
+      letter-spacing: 0.02em;
     }
     .p5em-playlist-editor {
       margin-top: 10px;

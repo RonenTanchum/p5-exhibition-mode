@@ -7,7 +7,9 @@ export type ExhibitionModeOptions = {
   titleOverlayColor?: "white" | "gray" | "black";
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
+  titleOverlayBold?: boolean;
   overlayLayout?: ExhibitionOverlayLayout;
+  cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
   qrLink?: string;
   showQr?: boolean;
@@ -65,11 +67,14 @@ export type ExhibitionArtworkMetadataOptions = {
   titleOverlayColor?: "white" | "gray" | "black";
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
+  titleOverlayBold?: boolean;
   overlayLayout?: ExhibitionOverlayLayout;
+  cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
 };
 
 export type ExhibitionOverlayLayout = "separate" | "card";
+export type ExhibitionCardQrPlacement = "below" | "right" | "left";
 
 export type ExhibitionTitleOverlayFont =
   | "mono"
@@ -101,6 +106,7 @@ export type ExhibitionQrOptions = {
   qrSize?: number;
   qrProvider?: string;
   overlayLayout?: ExhibitionOverlayLayout;
+  cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
 };
 
@@ -152,6 +158,13 @@ export type ExhibitionPlaylistOptions = {
   startIndex?: number;
 };
 
+export type ExhibitionLogEntry = {
+  time: string;
+  level: "info" | "warn" | "error" | string;
+  message: string;
+  detail?: unknown;
+};
+
 export type ExhibitionDiagnostics = {
   title: string;
   artist: string;
@@ -161,7 +174,9 @@ export type ExhibitionDiagnostics = {
   titleOverlayColor: "white" | "gray" | "black";
   titleOverlayPosition: ExhibitionOverlayPosition;
   titleOverlaySize: number;
+  titleOverlayBold: boolean;
   overlayLayout: ExhibitionOverlayLayout;
+  cardQrPlacement: ExhibitionCardQrPlacement;
   overlaySafeArea: number;
   qrLink: string;
   qrVisible: boolean;
@@ -186,6 +201,7 @@ export type ExhibitionDiagnostics = {
   highContrast: boolean;
   watchdogEnabled: boolean;
   droppedFrames: number;
+  logs: ExhibitionLogEntry[];
   logCount: number;
   playlistEnabled: boolean;
   playlistIndex: number;

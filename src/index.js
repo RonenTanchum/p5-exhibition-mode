@@ -7,7 +7,9 @@ const DEFAULTS = {
   titleOverlayColor: "white",
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
+  titleOverlayBold: false,
   overlayLayout: "separate",
+  cardQrPlacement: "below",
   overlaySafeArea: 18,
   qrLink: "",
   showQr: false,
@@ -172,6 +174,7 @@ export function createExhibitionMode(options = {}) {
     document.getElementById("p5em-title-overlay")?.remove();
     document.getElementById("p5em-qr-overlay")?.remove();
     document.getElementById("p5em-card-overlay")?.remove();
+    document.getElementById("p5em-overlay-layer")?.remove();
     document.documentElement.style.removeProperty("--p5em-overlay-safe-area");
   }
 
@@ -228,7 +231,9 @@ export function createExhibitionMode(options = {}) {
       titleOverlayColor: config.titleOverlayColor,
       titleOverlayPosition: config.titleOverlayPosition,
       titleOverlaySize: config.titleOverlaySize,
+      titleOverlayBold: Boolean(config.titleOverlayBold),
       overlayLayout: config.overlayLayout,
+      cardQrPlacement: config.cardQrPlacement,
       overlaySafeArea: config.overlaySafeArea,
       qrLink: config.qrLink,
       qrVisible: Boolean(config.showQr),
@@ -254,6 +259,7 @@ export function createExhibitionMode(options = {}) {
       highContrast: Boolean(accessibilityConfig().highContrast),
       watchdogEnabled: Boolean(watchdogConfig().enabled),
       droppedFrames: state.droppedFrames,
+      logs: state.logs.slice(-80),
       logCount: state.logs.length,
       playlistEnabled: Boolean(state.playlistEnabled),
       playlistIndex: state.playlistIndex,
@@ -448,7 +454,9 @@ export function createExhibitionMode(options = {}) {
     if ("titleOverlayColor" in next) config.titleOverlayColor = normalizeTitleColor(next.titleOverlayColor);
     if ("titleOverlayPosition" in next) config.titleOverlayPosition = normalizeOverlayPosition(next.titleOverlayPosition);
     if ("titleOverlaySize" in next) config.titleOverlaySize = clamp(Number(next.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48);
+    if ("titleOverlayBold" in next) config.titleOverlayBold = Boolean(next.titleOverlayBold);
     if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
+    if ("cardQrPlacement" in next) config.cardQrPlacement = normalizeCardQrPlacement(next.cardQrPlacement);
     if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
     applyTitleOverlay();
     applyOverlaySafeArea();
@@ -465,6 +473,7 @@ export function createExhibitionMode(options = {}) {
     if ("qrSize" in next) config.qrSize = clamp(Number(next.qrSize) || DEFAULTS.qrSize, 48, 320);
     if ("qrProvider" in next) config.qrProvider = String(next.qrProvider || DEFAULTS.qrProvider);
     if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
+    if ("cardQrPlacement" in next) config.cardQrPlacement = normalizeCardQrPlacement(next.cardQrPlacement);
     if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
     applyOverlaySafeArea();
     applyQrOverlay();
@@ -532,12 +541,14 @@ export function createExhibitionMode(options = {}) {
     if (!overlay) {
       overlay = document.createElement("div");
       overlay.id = "p5em-title-overlay";
-      document.body.appendChild(overlay);
+      ensureOverlayLayer().appendChild(overlay);
     }
     overlay.textContent = formatTitleOverlay(config);
     overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
+    overlay.dataset.stackQr = shouldStackSeparateQr() ? "true" : "false";
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
+    overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
     overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
   }
 
@@ -553,13 +564,15 @@ export function createExhibitionMode(options = {}) {
       overlay.target = "_blank";
       overlay.rel = "noopener noreferrer";
       overlay.innerHTML = `<img alt="QR code">`;
-      document.body.appendChild(overlay);
+      ensureOverlayLayer().appendChild(overlay);
     }
     const size = clamp(Number(config.qrSize) || DEFAULTS.qrSize, 48, 320);
     overlay.href = config.qrLink;
     overlay.dataset.position = normalizeOverlayPosition(config.qrPosition);
+    overlay.dataset.stackTitle = shouldStackSeparateQr() ? "true" : "false";
     overlay.style.width = `${size}px`;
     overlay.style.height = `${size}px`;
+    overlay.style.setProperty("--p5em-qr-stack-offset", `${size + 14}px`);
     overlay.querySelector("img").src = buildQrUrl(config.qrLink, size, config.qrProvider);
   }
 
@@ -581,7 +594,7 @@ export function createExhibitionMode(options = {}) {
         </div>
         <img alt="QR code">
       `;
-      document.body.appendChild(overlay);
+      ensureOverlayLayer().appendChild(overlay);
     }
     if (showQr && overlay.tagName !== "A") {
       const replacement = document.createElement("a");
@@ -606,7 +619,11 @@ export function createExhibitionMode(options = {}) {
     overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
+    overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
+    overlay.dataset.qrPlacement = normalizeCardQrPlacement(config.cardQrPlacement);
     overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
+    const copy = overlay.querySelector(".p5em-card-copy");
+    copy.hidden = !showTitle;
     overlay.querySelector("strong").textContent = config.title || "Artwork Title";
     overlay.querySelector("span").textContent = [config.artist || "Artist Name", config.year].filter(Boolean).join(" · ");
     const image = overlay.querySelector("img");
@@ -617,6 +634,26 @@ export function createExhibitionMode(options = {}) {
       image.style.height = `${cardQrSize}px`;
       image.src = buildQrUrl(config.qrLink, cardQrSize, config.qrProvider);
     }
+  }
+
+  function ensureOverlayLayer() {
+    let layer = document.getElementById("p5em-overlay-layer");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = "p5em-overlay-layer";
+      document.body.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function shouldStackSeparateQr() {
+    return Boolean(
+      config.showTitleOverlay &&
+      config.showQr &&
+      config.qrLink &&
+      normalizeOverlayLayout(config.overlayLayout) === "separate" &&
+      normalizeOverlayPosition(config.titleOverlayPosition) === normalizeOverlayPosition(config.qrPosition)
+    );
   }
 
   function setupPlaylist() {
@@ -1001,6 +1038,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
     setText("p5em-reloads", String(d.reloadCount));
+    renderLogRows(state.panel, d.logs);
     setChecked("context", d.contextMenuLocked);
     setChecked("touch", d.touchGesturesLocked);
     setChecked("cursor", d.cursorHiddenEnabled);
@@ -1016,6 +1054,7 @@ export function createExhibitionMode(options = {}) {
     setInputValue("current-hash", d.currentHash);
     setInputValue("qr-link", d.qrLink);
     setInputValue("overlay-layout", d.overlayLayout);
+    setInputValue("card-qr-placement", d.cardQrPlacement);
     setInputValue("title-size", d.titleOverlaySize);
     setInputValue("overlay-safe-area", d.overlaySafeArea);
     setInputValue("qr-size", d.qrSize);
@@ -1023,6 +1062,7 @@ export function createExhibitionMode(options = {}) {
     setInputValue("title-color", d.titleOverlayColor);
     setInputValue("title-position", d.titleOverlayPosition);
     setInputValue("qr-position", d.qrPosition);
+    setChecked("title-bold", d.titleOverlayBold);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
@@ -1118,6 +1158,7 @@ function createPanel(config, api) {
       <button type="button" class="is-active" data-tab="runtime" role="tab" aria-selected="true">Runtime</button>
       <button type="button" data-tab="overlay" role="tab" aria-selected="false">Overlay</button>
       <button type="button" data-tab="playlist" role="tab" aria-selected="false">Playlist</button>
+      <button type="button" data-tab="log" role="tab" aria-selected="false">Log</button>
     </div>
     <div class="p5em-tab-panel is-active" data-panel="runtime" role="tabpanel">
       <div class="p5em-panel-grid">
@@ -1170,12 +1211,6 @@ function createPanel(config, api) {
       <div class="p5em-overlay-controls">
         <div class="p5em-control-group p5em-control-group-wide">
           <h2>Title Overlay</h2>
-          <label class="p5em-number-control">
-            <span>Layout</span>
-            <select data-input="overlay-layout">
-              ${overlayLayoutOptions(config.overlayLayout)}
-            </select>
-          </label>
           <label class="p5em-text-control">
             <span>Artwork Title</span>
             <input data-input="artwork-title" type="text" value="${escapeAttr(config.title)}">
@@ -1188,7 +1223,24 @@ function createPanel(config, api) {
             <span>Year</span>
             <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
           </label>
-          ${toggle("title-overlay", "Show title overlay")}
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide p5em-compact-group">
+          <h2>Layout</h2>
+          <label class="p5em-number-control">
+            <span>Overlay Mode</span>
+            <select data-input="overlay-layout">
+              ${overlayLayoutOptions(config.overlayLayout)}
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Card QR</span>
+            <select data-input="card-qr-placement">
+              ${cardQrPlacementOptions(config.cardQrPlacement)}
+            </select>
+          </label>
+          ${toggle("title-overlay", "Show title")}
+          ${toggle("qr-overlay", "Show QR")}
+          ${toggle("title-bold", "Bold title")}
           <label class="p5em-number-control">
             <span>Title Size</span>
             <input data-input="title-size" type="range" min="8" max="48" step="1" value="${config.titleOverlaySize}">
@@ -1208,35 +1260,34 @@ function createPanel(config, api) {
             </select>
           </label>
           <label class="p5em-number-control">
-            <span>Title Position</span>
-            <select data-input="title-position">
-              ${positionOptions(config.titleOverlayPosition)}
-            </select>
-          </label>
-        </div>
-        <div class="p5em-control-group p5em-control-group-wide">
-          <h2>Safe Border</h2>
-          <label class="p5em-number-control p5em-wide-control">
-            <span>Safe Area Size</span>
+            <span>Safe Border</span>
             <input data-input="overlay-safe-area" type="range" min="0" max="160" step="2" value="${config.overlaySafeArea}">
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
-          <h2>QR Code</h2>
-          <label class="p5em-text-control">
-            <span>QR Link</span>
-            <input data-input="qr-link" type="url" value="${escapeAttr(config.qrLink)}" placeholder="https://...">
-          </label>
-          ${toggle("qr-overlay", "Show QR code")}
+          <h2>Position</h2>
           <label class="p5em-number-control">
-            <span>QR Size</span>
-            <input data-input="qr-size" type="range" min="48" max="320" step="4" value="${config.qrSize}">
+            <span>Title Position</span>
+            <select data-input="title-position">
+              ${positionOptions(config.titleOverlayPosition)}
+            </select>
           </label>
           <label class="p5em-number-control">
             <span>QR Position</span>
             <select data-input="qr-position">
               ${positionOptions(config.qrPosition)}
             </select>
+          </label>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>QR Code</h2>
+          <label class="p5em-text-control p5em-wide-control">
+            <span>QR Link</span>
+            <input data-input="qr-link" type="url" value="${escapeAttr(config.qrLink)}" placeholder="https://...">
+          </label>
+          <label class="p5em-number-control">
+            <span>QR Size</span>
+            <input data-input="qr-size" type="range" min="48" max="320" step="4" value="${config.qrSize}">
           </label>
         </div>
       </div>
@@ -1279,15 +1330,25 @@ function createPanel(config, api) {
         <p>Type a served local path or web URL. Apply URLs persists settings. Drop HTML is temporary preview only and is available for local rows.</p>
       </section>
     </div>
+    <div class="p5em-tab-panel" data-panel="log" role="tabpanel" hidden>
+      <section class="p5em-log-viewer">
+        <div class="p5em-log-head">
+          <h2>Runtime Log</h2>
+          <button type="button" data-action="log-copy">Copy</button>
+        </div>
+        <div class="p5em-log-rows" data-log-rows></div>
+      </section>
+    </div>
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
       <button type="button" data-action="screenshot">Screenshot</button>
-      <button type="button" data-action="diagnostics">Diagnostics</button>
       <button type="button" data-action="playlist-apply">Apply URLs</button>
       <button type="button" data-action="playlist-save-json">Save JSON</button>
+      <button type="button" data-action="runtime-load-json">Load JSON</button>
       <button type="button" data-action="playlist-prev">Prev URL</button>
       <button type="button" data-action="playlist-next">Next URL</button>
+      <input data-input="runtime-config-file" type="file" accept="application/json,.json" hidden>
     </div>
     <p class="p5em-panel-hint">Shift + ${config.panelKey.toUpperCase()} toggles this panel.</p>
   `;
@@ -1301,6 +1362,7 @@ function createPanel(config, api) {
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
+    if (action === "log-copy") copyText(JSON.stringify(api.diagnostics().logs || [], null, 2));
     if (action === "copy-hash") copyText(api.diagnostics().currentHash || "");
     if (action === "hash-record-start") api.startHashRecording();
     if (action === "hash-record-stop") api.stopHashRecording();
@@ -1310,6 +1372,7 @@ function createPanel(config, api) {
       api.setPlaylistItems(collectPlaylistRows(panel));
     }
     if (action === "playlist-save-json") api.exportConfig();
+    if (action === "runtime-load-json") panel.querySelector("[data-input='runtime-config-file']")?.click();
     if (action === "playlist-add") {
       addPlaylistRow(panel, "");
       const container = panel.querySelector("[data-playlist-rows]");
@@ -1335,6 +1398,7 @@ function createPanel(config, api) {
     if (toggle === "cursor") api.setOption("hideCursor", event.target.checked);
     if (toggle === "title-overlay") api.setArtworkMetadata({ showTitleOverlay: event.target.checked });
     if (toggle === "qr-overlay") api.setQrOptions({ showQr: event.target.checked });
+    if (toggle === "title-bold") api.setArtworkMetadata({ titleOverlayBold: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
     if (toggle === "playlist") api.togglePlaylist(event.target.checked);
@@ -1374,6 +1438,9 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "overlay-layout") {
       api.setOverlayLayout(event.target.value);
     }
+    if (event.target?.dataset?.input === "card-qr-placement") {
+      api.setQrOptions({ cardQrPlacement: event.target.value });
+    }
     if (event.target?.dataset?.input === "overlay-safe-area") {
       api.setOverlaySafeArea(event.target.value);
     }
@@ -1401,6 +1468,10 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "playlist-file") {
       previewDroppedArtwork(event.target, api, event.target.closest(".p5em-playlist-row"));
+      event.target.value = "";
+    }
+    if (event.target?.dataset?.input === "runtime-config-file") {
+      loadConfigFile(event.target.files?.[0], api, panel);
       event.target.value = "";
     }
   });
@@ -1443,6 +1514,22 @@ function activatePanelTab(panel, tab) {
     section.classList.toggle("is-active", active);
     section.hidden = !active;
   });
+}
+
+function renderLogRows(panel, logs = []) {
+  const container = panel?.querySelector("[data-log-rows]");
+  if (!container) return;
+  if (!logs.length) {
+    container.innerHTML = `<p>No runtime events yet.</p>`;
+    return;
+  }
+  container.innerHTML = logs.slice().reverse().map((entry) => `
+    <article class="p5em-log-row" data-level="${escapeAttr(entry.level)}">
+      <time>${escapeHtml(formatLogTime(entry.time))}</time>
+      <strong>${escapeHtml(entry.level || "info")}</strong>
+      <span>${escapeHtml(entry.message || "")}</span>
+    </article>
+  `).join("");
 }
 
 function syncPlaylistRows(panel, items, options = {}) {
@@ -1515,6 +1602,21 @@ async function previewDroppedArtwork(source, api, row = null) {
   const url = await createDroppedArtworkUrl(html, files);
   api.previewPlaylistUrl(url);
   markTemporaryPreview(row, getDroppedFilePath(html));
+}
+
+function loadConfigFile(file, api, panel) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    try {
+      const next = JSON.parse(String(reader.result || "{}"));
+      api.loadConfig(next);
+      syncPlaylistRows(panel, playlistConfigFrom(api.getConfig()).items, { force: true });
+    } catch (error) {
+      console.warn("p5 Exhibition Mode could not load runtime JSON", error);
+    }
+  });
+  reader.readAsText(file);
 }
 
 function markTemporaryPreview(row, filename) {
@@ -1725,30 +1827,37 @@ function injectStyles() {
     .p5em-kiosk .p5em-playlist-frame {
       pointer-events: none;
     }
-    #p5em-title-overlay {
+    #p5em-overlay-layer {
       position: fixed;
+      left: 50%;
+      top: 50%;
       z-index: 2147483646;
-      max-width: min(520px, calc(100vw - 36px));
-      font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      width: var(--p5em-frame-width, 100vw);
+      height: var(--p5em-frame-height, 100vh);
+      transform: translate(-50%, -50%) rotate(var(--p5em-rotation, 0deg));
       transform-origin: center center;
       pointer-events: none;
     }
+    #p5em-title-overlay {
+      position: absolute;
+      max-width: min(520px, calc(100% - 36px));
+      font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
     #p5em-card-overlay {
-      position: fixed;
-      z-index: 2147483646;
+      position: absolute;
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       gap: 14px;
-      max-width: min(520px, calc(100vw - 36px));
+      max-width: min(520px, calc(100% - 36px));
       padding: 14px;
       color: rgba(255,255,255,0.9);
       background: rgba(7,7,7,0.72);
       border: 1px solid rgba(255,255,255,0.18);
       backdrop-filter: blur(14px);
-      transform-origin: center center;
       text-decoration: none;
       pointer-events: auto;
     }
@@ -1762,6 +1871,10 @@ function injectStyles() {
       font: inherit;
       font-weight: 500;
     }
+    #p5em-title-overlay[data-bold="true"],
+    #p5em-card-overlay[data-bold="true"] strong {
+      font-weight: 700;
+    }
     #p5em-card-overlay span {
       color: rgba(255,255,255,0.58);
       font: 400 max(9px, 0.58em)/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1772,6 +1885,23 @@ function injectStyles() {
       display: block;
       padding: 5px;
       background: rgba(255,255,255,0.92);
+    }
+    #p5em-card-overlay[data-qr-placement="below"] {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: start;
+      max-width: min(360px, calc(100% - 36px));
+    }
+    #p5em-card-overlay[data-qr-placement="below"] img {
+      margin-top: 2px;
+    }
+    #p5em-card-overlay[data-qr-placement="left"] {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    #p5em-card-overlay[data-qr-placement="left"] .p5em-card-copy {
+      order: 2;
+    }
+    #p5em-card-overlay[data-qr-placement="left"] img {
+      order: 1;
     }
     #p5em-title-overlay[data-font="sans"],
     #p5em-card-overlay[data-font="sans"] {
@@ -1846,7 +1976,6 @@ function injectStyles() {
     #p5em-title-overlay[data-color="black"],
     #p5em-card-overlay[data-color="black"] {
       color: rgba(0,0,0,0.88);
-      background: rgba(255,255,255,0.72);
       border-color: rgba(0,0,0,0.16);
     }
     #p5em-title-overlay[data-color="gray"],
@@ -1865,12 +1994,18 @@ function injectStyles() {
       top: auto;
       bottom: var(--p5em-overlay-safe-area, 18px);
     }
+    #p5em-title-overlay[data-stack-qr="true"][data-position^="bottom"] {
+      bottom: calc(var(--p5em-overlay-safe-area, 18px) + var(--p5em-qr-stack-offset, 110px));
+    }
+    #p5em-qr-overlay[data-stack-title="true"][data-position^="top"] {
+      top: calc(var(--p5em-overlay-safe-area, 18px) + 52px);
+    }
     #p5em-title-overlay[data-position$="left"],
     #p5em-qr-overlay[data-position$="left"],
     #p5em-card-overlay[data-position$="left"] {
       left: var(--p5em-overlay-safe-area, 18px);
       right: auto;
-      transform: rotate(var(--p5em-rotation, 0deg));
+      transform: none;
       text-align: left;
     }
     #p5em-title-overlay[data-position$="center"],
@@ -1878,7 +2013,7 @@ function injectStyles() {
     #p5em-card-overlay[data-position$="center"] {
       left: 50%;
       right: auto;
-      transform: translateX(-50%) rotate(var(--p5em-rotation, 0deg));
+      transform: translateX(-50%);
       text-align: center;
     }
     #p5em-title-overlay[data-position$="right"],
@@ -1886,17 +2021,15 @@ function injectStyles() {
     #p5em-card-overlay[data-position$="right"] {
       left: auto;
       right: var(--p5em-overlay-safe-area, 18px);
-      transform: rotate(var(--p5em-rotation, 0deg));
+      transform: none;
       text-align: right;
     }
     #p5em-qr-overlay {
-      position: fixed;
-      z-index: 2147483646;
+      position: absolute;
       display: block;
       padding: 6px;
       background: rgba(255,255,255,0.9);
       box-shadow: 0 8px 30px rgba(0,0,0,0.28);
-      transform-origin: center center;
       pointer-events: auto;
     }
     #p5em-qr-overlay img {
@@ -2062,6 +2195,9 @@ function injectStyles() {
     }
     .p5em-control-group-wide {
       grid-column: 1 / -1;
+    }
+    .p5em-compact-group {
+      align-items: center;
     }
     .p5em-wide-control {
       grid-column: 1 / -1;
@@ -2251,6 +2387,89 @@ function injectStyles() {
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
+    .p5em-log-viewer {
+      margin-top: 10px;
+      padding-top: 10px;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-log-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex: 0 0 auto;
+      margin-bottom: 8px;
+    }
+    .p5em-log-head h2 {
+      margin: 0;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p5em-log-head button {
+      padding: 7px 8px;
+      color: rgba(255,255,255,0.78);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .p5em-log-rows {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 6px;
+    }
+    .p5em-log-rows p {
+      margin: 0;
+      color: rgba(255,255,255,0.42);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .p5em-log-row {
+      display: grid;
+      grid-template-columns: 72px 56px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      padding: 7px 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.025);
+      color: rgba(255,255,255,0.7);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+    .p5em-log-row time,
+    .p5em-log-row strong {
+      color: rgba(255,255,255,0.48);
+      font-weight: 400;
+      text-transform: uppercase;
+    }
+    .p5em-log-row span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .p5em-log-row[data-level="error"] {
+      border-color: rgba(255,120,120,0.34);
+      color: rgba(255,190,190,0.92);
+    }
+    .p5em-log-row[data-level="warn"] {
+      border-color: rgba(255,210,120,0.28);
+      color: rgba(255,230,180,0.86);
+    }
     .p5em-toggle,
     .p5em-number-control {
       display: flex;
@@ -2415,6 +2634,9 @@ function serializeRuntimeConfig(config) {
     titleOverlayColor: config.titleOverlayColor,
     titleOverlayPosition: config.titleOverlayPosition,
     titleOverlaySize: config.titleOverlaySize,
+    titleOverlayBold: Boolean(config.titleOverlayBold),
+    overlayLayout: config.overlayLayout,
+    cardQrPlacement: config.cardQrPlacement,
     overlaySafeArea: config.overlaySafeArea,
     qrLink: config.qrLink,
     showQr: config.showQr,
@@ -2480,6 +2702,14 @@ function overlayLayoutOptions(selected = "separate") {
   ].map(([value, label]) => `<option value="${value}"${normalizeOverlayLayout(selected) === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
+function cardQrPlacementOptions(selected = "below") {
+  return [
+    ["below", "Below Title"],
+    ["right", "Right Side"],
+    ["left", "Left Side"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeCardQrPlacement(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
 function fontOptions(selected = "mono") {
   return [
     ["mono", "Mono"],
@@ -2505,6 +2735,11 @@ function normalizeOverlayPosition(value) {
 
 function normalizeOverlayLayout(value) {
   return value === "card" ? "card" : "separate";
+}
+
+function normalizeCardQrPlacement(value) {
+  if (value === "left" || value === "right") return value;
+  return "below";
 }
 
 function normalizeTitleFont(value) {
@@ -2553,6 +2788,12 @@ function shortenMiddle(value, max = 40) {
   return `${text.slice(0, keep)}...${text.slice(-keep)}`;
 }
 
+function formatLogTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function safeName(name) {
   return String(name || "artwork").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -2583,6 +2824,13 @@ async function copyDiagnostics(data) {
 async function copyText(text) {
   if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text).catch(() => {});
   else console.info("p5 Exhibition Mode", text);
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function buildPlaylistUrl(input, playlist) {

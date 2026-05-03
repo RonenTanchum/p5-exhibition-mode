@@ -82,7 +82,9 @@ const exhibition = createExhibitionMode({
   titleOverlayColor: "white",
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
+  titleOverlayBold: false,
   overlayLayout: "separate",
+  cardQrPlacement: "below",
   overlaySafeArea: 18,
   qrLink: "",
   showQr: false,
@@ -184,7 +186,9 @@ exhibition.setArtworkMetadata({
   titleOverlayColor: "gray",
   titleOverlayPosition: "top-left",
   titleOverlaySize: 16,
+  titleOverlayBold: true,
   overlayLayout: "card",
+  cardQrPlacement: "below",
   overlaySafeArea: 32
 });
 exhibition.setQrOptions({
@@ -208,7 +212,7 @@ Useful methods:
 - `setCursor({ hide, mode, idleMs })`
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
-- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, overlayLayout, overlaySafeArea })`
+- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, overlayLayout, cardQrPlacement, overlaySafeArea })`
 - `setQrOptions({ qrLink, showQr, qrPosition, qrSize, overlaySafeArea })`
 - `setOverlayLayout("separate" | "card")`
 - `setOverlaySafeArea(pixels)`
@@ -406,11 +410,14 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 - **Runtime tab:** display status, input locks, accessibility controls, rotation, hash recording, watchdog, and system diagnostics.
 - **Overlay tab:** title overlay, QR code, shared safe border, font selection, and optional title + QR card layout.
 - **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
-- **Actions:** fullscreen, reset, screenshot, diagnostics, apply playlist URLs, previous URL, and next URL.
+- **Log tab:** recent runtime, browser, WebGL, watchdog, and artwork errors from the in-page log buffer.
+- **Actions:** fullscreen, reset, screenshot, apply playlist URLs, save/load JSON, previous URL, and next URL.
 
 The panel is designed to fit within the screen height. Runtime, Overlay, and Playlist controls are separated into tabs so title, QR, hash recording, and playlist setup do not crowd the kiosk diagnostics.
 
-The Overlay tab can display title and QR independently or as a single exhibition-label card. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
+The Overlay tab can display title and QR independently or as a single exhibition-label card. Card mode can place the QR below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
+
+**Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR settings, playlist URLs, intervals, kiosk locks, accessibility, watchdog, logging, and health check settings. **Load JSON** imports that file back into the runtime and refreshes the panel.
 
 ## Options
 
@@ -424,7 +431,9 @@ createExhibitionMode({
   titleOverlayColor: "white",
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
+  titleOverlayBold: false,
   overlayLayout: "separate",
+  cardQrPlacement: "below",
   overlaySafeArea: 18,
   qrLink: "",
   showQr: false,

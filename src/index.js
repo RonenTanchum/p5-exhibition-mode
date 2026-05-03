@@ -8,6 +8,10 @@ const DEFAULTS = {
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  freeText: "",
+  showFreeText: false,
+  freeTextPosition: "bottom-left",
+  freeTextSize: 10,
   overlayLayout: "separate",
   cardQrPlacement: "below",
   overlaySafeArea: 18,
@@ -122,6 +126,7 @@ export function createExhibitionMode(options = {}) {
     applyCursorMode();
     applyOverlaySafeArea();
     applyTitleOverlay();
+    applyFreeTextOverlay();
     applyQrOverlay();
     applyOverlayCard();
     setupPlaylist();
@@ -174,6 +179,7 @@ export function createExhibitionMode(options = {}) {
     state.panel?.remove();
     state.playlistFrame?.remove();
     document.getElementById("p5em-title-overlay")?.remove();
+    document.getElementById("p5em-free-text-overlay")?.remove();
     document.getElementById("p5em-qr-overlay")?.remove();
     document.getElementById("p5em-card-overlay")?.remove();
     document.getElementById("p5em-overlay-layer")?.remove();
@@ -235,6 +241,10 @@ export function createExhibitionMode(options = {}) {
       titleOverlayPosition: config.titleOverlayPosition,
       titleOverlaySize: config.titleOverlaySize,
       titleOverlayBold: Boolean(config.titleOverlayBold),
+      freeText: config.freeText,
+      freeTextVisible: Boolean(config.showFreeText),
+      freeTextPosition: config.freeTextPosition,
+      freeTextSize: config.freeTextSize,
       overlayLayout: config.overlayLayout,
       cardQrPlacement: config.cardQrPlacement,
       overlaySafeArea: config.overlaySafeArea,
@@ -458,10 +468,15 @@ export function createExhibitionMode(options = {}) {
     if ("titleOverlayPosition" in next) config.titleOverlayPosition = normalizeOverlayPosition(next.titleOverlayPosition);
     if ("titleOverlaySize" in next) config.titleOverlaySize = clamp(Number(next.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48);
     if ("titleOverlayBold" in next) config.titleOverlayBold = Boolean(next.titleOverlayBold);
+    if ("freeText" in next) config.freeText = String(next.freeText || "");
+    if ("showFreeText" in next) config.showFreeText = Boolean(next.showFreeText);
+    if ("freeTextPosition" in next) config.freeTextPosition = normalizeOverlayPosition(next.freeTextPosition);
+    if ("freeTextSize" in next) config.freeTextSize = clamp(Number(next.freeTextSize) || DEFAULTS.freeTextSize, 8, 48);
     if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
     if ("cardQrPlacement" in next) config.cardQrPlacement = normalizeCardQrPlacement(next.cardQrPlacement);
     if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
     applyTitleOverlay();
+    applyFreeTextOverlay();
     applyOverlaySafeArea();
     applyOverlayCard();
     persistConfig();
@@ -498,6 +513,7 @@ export function createExhibitionMode(options = {}) {
   function setOverlayLayout(value) {
     config.overlayLayout = normalizeOverlayLayout(value);
     applyTitleOverlay();
+    applyFreeTextOverlay();
     applyQrOverlay();
     applyOverlayCard();
     persistConfig();
@@ -555,6 +571,25 @@ export function createExhibitionMode(options = {}) {
     overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
   }
 
+  function applyFreeTextOverlay() {
+    let overlay = document.getElementById("p5em-free-text-overlay");
+    if (!config.showFreeText || !config.freeText || normalizeOverlayLayout(config.overlayLayout) === "card") {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "p5em-free-text-overlay";
+      ensureOverlayLayer().appendChild(overlay);
+    }
+    overlay.textContent = config.freeText;
+    overlay.dataset.position = normalizeOverlayPosition(config.freeTextPosition);
+    overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
+    overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
+    overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
+    overlay.style.fontSize = `${clamp(Number(config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48)}px`;
+  }
+
   function applyQrOverlay() {
     let overlay = document.getElementById("p5em-qr-overlay");
     if (!config.showQr || !config.qrLink || normalizeOverlayLayout(config.overlayLayout) === "card") {
@@ -582,8 +617,9 @@ export function createExhibitionMode(options = {}) {
   function applyOverlayCard() {
     let overlay = document.getElementById("p5em-card-overlay");
     const showTitle = Boolean(config.showTitleOverlay);
+    const showFreeText = Boolean(config.showFreeText && config.freeText);
     const showQr = Boolean(config.showQr && config.qrLink);
-    if (normalizeOverlayLayout(config.overlayLayout) !== "card" || (!showTitle && !showQr)) {
+    if (normalizeOverlayLayout(config.overlayLayout) !== "card" || (!showTitle && !showFreeText && !showQr)) {
       overlay?.remove();
       return;
     }
@@ -593,6 +629,7 @@ export function createExhibitionMode(options = {}) {
       overlay.innerHTML = `
         <div class="p5em-card-copy">
           <strong></strong>
+          <p></p>
           <span></span>
         </div>
         <img alt="QR code">
@@ -626,8 +663,14 @@ export function createExhibitionMode(options = {}) {
     overlay.dataset.qrPlacement = normalizeCardQrPlacement(config.cardQrPlacement);
     overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
     const copy = overlay.querySelector(".p5em-card-copy");
-    copy.hidden = !showTitle;
-    overlay.querySelector("strong").textContent = config.title || "Artwork Title";
+    copy.hidden = !showTitle && !showFreeText;
+    const title = overlay.querySelector("strong");
+    title.hidden = !showTitle;
+    title.textContent = config.title || "Artwork Title";
+    const free = overlay.querySelector("p");
+    free.hidden = !showFreeText;
+    free.textContent = config.freeText || "";
+    free.style.fontSize = `${clamp(Number(config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48)}px`;
     overlay.querySelector("span").textContent = [config.artist || "Artist Name", config.year].filter(Boolean).join(" · ");
     const image = overlay.querySelector("img");
     image.hidden = !showQr;
@@ -890,6 +933,7 @@ export function createExhibitionMode(options = {}) {
     applyCursorMode();
     applyOverlaySafeArea();
     applyTitleOverlay();
+    applyFreeTextOverlay();
     applyQrOverlay();
     applyOverlayCard();
     updateInputLockClasses();
@@ -1085,18 +1129,22 @@ export function createExhibitionMode(options = {}) {
     setInputValue("artwork-title", d.title);
     setInputValue("artwork-artist", d.artist);
     setInputValue("artwork-year", d.year);
+    setInputValue("free-text", d.freeText);
     setInputValue("current-hash", d.currentHash);
     setInputValue("qr-link", d.qrLink);
     setInputValue("overlay-layout", d.overlayLayout);
     setInputValue("card-qr-placement", d.cardQrPlacement);
     setInputValue("title-size", d.titleOverlaySize);
+    setInputValue("free-text-size", d.freeTextSize);
     setInputValue("overlay-safe-area", d.overlaySafeArea);
     setInputValue("qr-size", d.qrSize);
     setInputValue("title-font", d.titleOverlayFont);
     setInputValue("title-color", d.titleOverlayColor);
     setInputValue("title-position", d.titleOverlayPosition);
+    setInputValue("free-text-position", d.freeTextPosition);
     setInputValue("qr-position", d.qrPosition);
     setChecked("title-bold", d.titleOverlayBold);
+    setChecked("free-text-overlay", d.freeTextVisible);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
@@ -1257,6 +1305,10 @@ function createPanel(config, api) {
             <span>Year</span>
             <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
           </label>
+          <label class="p5em-text-control p5em-wide-control">
+            <span>Free Text</span>
+            <input data-input="free-text" type="text" value="${escapeAttr(config.freeText)}" placeholder="Description, caption, venue note...">
+          </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide p5em-compact-group">
           <h2>Layout</h2>
@@ -1274,6 +1326,7 @@ function createPanel(config, api) {
           </label>
           ${toggle("title-overlay", "Show title")}
           ${toggle("qr-overlay", "Show QR")}
+          ${toggle("free-text-overlay", "Show text")}
           ${toggle("title-bold", "Bold title")}
           <label class="p5em-number-control">
             <span>Title Size</span>
@@ -1294,6 +1347,10 @@ function createPanel(config, api) {
             </select>
           </label>
           <label class="p5em-number-control">
+            <span>Text Size</span>
+            <input data-input="free-text-size" type="range" min="8" max="48" step="1" value="${config.freeTextSize}">
+          </label>
+          <label class="p5em-number-control">
             <span>Safe Border</span>
             <input data-input="overlay-safe-area" type="range" min="0" max="160" step="2" value="${config.overlaySafeArea}">
           </label>
@@ -1304,6 +1361,12 @@ function createPanel(config, api) {
             <span>Title Position</span>
             <select data-input="title-position">
               ${positionOptions(config.titleOverlayPosition)}
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Text Position</span>
+            <select data-input="free-text-position">
+              ${positionOptions(config.freeTextPosition)}
             </select>
           </label>
           <label class="p5em-number-control">
@@ -1432,6 +1495,7 @@ function createPanel(config, api) {
     if (toggle === "cursor") api.setOption("hideCursor", event.target.checked);
     if (toggle === "title-overlay") api.setArtworkMetadata({ showTitleOverlay: event.target.checked });
     if (toggle === "qr-overlay") api.setQrOptions({ showQr: event.target.checked });
+    if (toggle === "free-text-overlay") api.setArtworkMetadata({ showFreeText: event.target.checked });
     if (toggle === "title-bold") api.setArtworkMetadata({ titleOverlayBold: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
@@ -1466,8 +1530,14 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "artwork-year") {
       api.setArtworkMetadata({ year: event.target.value });
     }
+    if (event.target?.dataset?.input === "free-text") {
+      api.setArtworkMetadata({ freeText: event.target.value });
+    }
     if (event.target?.dataset?.input === "title-size") {
       api.setArtworkMetadata({ titleOverlaySize: event.target.value });
+    }
+    if (event.target?.dataset?.input === "free-text-size") {
+      api.setArtworkMetadata({ freeTextSize: event.target.value });
     }
     if (event.target?.dataset?.input === "overlay-layout") {
       api.setOverlayLayout(event.target.value);
@@ -1486,6 +1556,9 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "title-position") {
       api.setArtworkMetadata({ titleOverlayPosition: event.target.value });
+    }
+    if (event.target?.dataset?.input === "free-text-position") {
+      api.setArtworkMetadata({ freeTextPosition: event.target.value });
     }
     if (event.target?.dataset?.input === "qr-link") {
       api.setQrOptions({ qrLink: event.target.value });
@@ -1872,13 +1945,20 @@ function injectStyles() {
       transform-origin: center center;
       pointer-events: none;
     }
-    #p5em-title-overlay {
+    #p5em-title-overlay,
+    #p5em-free-text-overlay {
       position: absolute;
       max-width: min(520px, calc(100% - 36px));
       font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       pointer-events: none;
+    }
+    #p5em-free-text-overlay {
+      max-width: min(620px, calc(100% - 36px));
+      line-height: 1.45;
+      letter-spacing: 0.03em;
+      text-transform: none;
     }
     #p5em-card-overlay {
       position: absolute;
@@ -1906,8 +1986,20 @@ function injectStyles() {
       font-weight: 500;
     }
     #p5em-title-overlay[data-bold="true"],
-    #p5em-card-overlay[data-bold="true"] strong {
+    #p5em-free-text-overlay[data-bold="true"],
+    #p5em-card-overlay[data-bold="true"] strong,
+    #p5em-card-overlay[data-bold="true"] p {
       font-weight: 700;
+    }
+    #p5em-card-overlay p {
+      margin: 0;
+      color: currentColor;
+      font: inherit;
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: 0.03em;
+      text-transform: none;
+      opacity: 0.86;
     }
     #p5em-card-overlay span {
       color: rgba(255,255,255,0.58);
@@ -1953,91 +2045,108 @@ function injectStyles() {
       order: 1;
     }
     #p5em-title-overlay[data-font="sans"],
+    #p5em-free-text-overlay[data-font="sans"],
     #p5em-card-overlay[data-font="sans"] {
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     #p5em-title-overlay[data-font="serif"],
+    #p5em-free-text-overlay[data-font="serif"],
     #p5em-card-overlay[data-font="serif"] {
       font-family: Georgia, "Times New Roman", serif;
       letter-spacing: 0.02em;
       text-transform: none;
     }
     #p5em-title-overlay[data-font="system"],
+    #p5em-free-text-overlay[data-font="system"],
     #p5em-card-overlay[data-font="system"] {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0.03em;
     }
     #p5em-title-overlay[data-font="condensed"],
+    #p5em-free-text-overlay[data-font="condensed"],
     #p5em-card-overlay[data-font="condensed"] {
       font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif;
       letter-spacing: 0.08em;
     }
     #p5em-title-overlay[data-font="humanist"],
+    #p5em-free-text-overlay[data-font="humanist"],
     #p5em-card-overlay[data-font="humanist"] {
       font-family: Avenir, "Avenir Next", Optima, Candara, sans-serif;
       letter-spacing: 0.04em;
       text-transform: none;
     }
     #p5em-title-overlay[data-font="editorial"],
+    #p5em-free-text-overlay[data-font="editorial"],
     #p5em-card-overlay[data-font="editorial"] {
       font-family: "Didot", "Bodoni 72", "Bodoni 72 Oldstyle", Georgia, serif;
       letter-spacing: 0.02em;
       text-transform: none;
     }
     #p5em-title-overlay[data-font="classic"],
+    #p5em-free-text-overlay[data-font="classic"],
     #p5em-card-overlay[data-font="classic"] {
       font-family: Garamond, "Iowan Old Style", "Times New Roman", serif;
       letter-spacing: 0.015em;
       text-transform: none;
     }
     #p5em-title-overlay[data-font="book"],
+    #p5em-free-text-overlay[data-font="book"],
     #p5em-card-overlay[data-font="book"] {
       font-family: "Hoefler Text", "Palatino Linotype", Palatino, Georgia, serif;
       letter-spacing: 0.01em;
       text-transform: none;
     }
     #p5em-title-overlay[data-font="neo"],
+    #p5em-free-text-overlay[data-font="neo"],
     #p5em-card-overlay[data-font="neo"] {
       font-family: Futura, "Avenir Next", Avenir, "Trebuchet MS", sans-serif;
       letter-spacing: 0.1em;
     }
     #p5em-title-overlay[data-font="geometric"],
+    #p5em-free-text-overlay[data-font="geometric"],
     #p5em-card-overlay[data-font="geometric"] {
       font-family: "Gill Sans", Futura, "Century Gothic", sans-serif;
       letter-spacing: 0.08em;
     }
     #p5em-title-overlay[data-font="architectural"],
+    #p5em-free-text-overlay[data-font="architectural"],
     #p5em-card-overlay[data-font="architectural"] {
       font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-weight: 600;
       letter-spacing: 0.16em;
     }
     #p5em-title-overlay[data-font="typewriter"],
+    #p5em-free-text-overlay[data-font="typewriter"],
     #p5em-card-overlay[data-font="typewriter"] {
       font-family: "Courier Prime", "Courier New", Courier, monospace;
       letter-spacing: 0.04em;
       text-transform: none;
     }
     #p5em-title-overlay[data-color="white"],
+    #p5em-free-text-overlay[data-color="white"],
     #p5em-card-overlay[data-color="white"] {
       color: rgba(255,255,255,0.88);
     }
     #p5em-title-overlay[data-color="black"],
+    #p5em-free-text-overlay[data-color="black"],
     #p5em-card-overlay[data-color="black"] {
       color: rgba(0,0,0,0.88);
       border-color: rgba(0,0,0,0.16);
     }
     #p5em-title-overlay[data-color="gray"],
+    #p5em-free-text-overlay[data-color="gray"],
     #p5em-card-overlay[data-color="gray"] {
       color: rgba(150,150,150,0.9);
     }
     #p5em-title-overlay[data-position^="top"],
+    #p5em-free-text-overlay[data-position^="top"],
     #p5em-qr-overlay[data-position^="top"],
     #p5em-card-overlay[data-position^="top"] {
       top: var(--p5em-overlay-safe-area, 18px);
       bottom: auto;
     }
     #p5em-title-overlay[data-position^="bottom"],
+    #p5em-free-text-overlay[data-position^="bottom"],
     #p5em-qr-overlay[data-position^="bottom"],
     #p5em-card-overlay[data-position^="bottom"] {
       top: auto;
@@ -2050,6 +2159,7 @@ function injectStyles() {
       top: calc(var(--p5em-overlay-safe-area, 18px) + 52px);
     }
     #p5em-title-overlay[data-position$="left"],
+    #p5em-free-text-overlay[data-position$="left"],
     #p5em-qr-overlay[data-position$="left"],
     #p5em-card-overlay[data-position$="left"] {
       left: var(--p5em-overlay-safe-area, 18px);
@@ -2058,6 +2168,7 @@ function injectStyles() {
       text-align: left;
     }
     #p5em-title-overlay[data-position$="center"],
+    #p5em-free-text-overlay[data-position$="center"],
     #p5em-qr-overlay[data-position$="center"],
     #p5em-card-overlay[data-position$="center"] {
       left: 50%;
@@ -2066,6 +2177,7 @@ function injectStyles() {
       text-align: center;
     }
     #p5em-title-overlay[data-position$="right"],
+    #p5em-free-text-overlay[data-position$="right"],
     #p5em-qr-overlay[data-position$="right"],
     #p5em-card-overlay[data-position$="right"] {
       left: auto;
@@ -2684,6 +2796,10 @@ function serializeRuntimeConfig(config) {
     titleOverlayPosition: config.titleOverlayPosition,
     titleOverlaySize: config.titleOverlaySize,
     titleOverlayBold: Boolean(config.titleOverlayBold),
+    freeText: config.freeText,
+    showFreeText: config.showFreeText,
+    freeTextPosition: config.freeTextPosition,
+    freeTextSize: config.freeTextSize,
     overlayLayout: config.overlayLayout,
     cardQrPlacement: config.cardQrPlacement,
     overlaySafeArea: config.overlaySafeArea,

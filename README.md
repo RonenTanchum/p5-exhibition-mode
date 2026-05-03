@@ -83,6 +83,10 @@ const exhibition = createExhibitionMode({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  freeText: "",
+  showFreeText: false,
+  freeTextPosition: "bottom-left",
+  freeTextSize: 10,
   overlayLayout: "separate",
   cardQrPlacement: "below",
   overlaySafeArea: 18,
@@ -187,6 +191,10 @@ exhibition.setArtworkMetadata({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 16,
   titleOverlayBold: true,
+  freeText: "Live generative study",
+  showFreeText: true,
+  freeTextPosition: "bottom-left",
+  freeTextSize: 11,
   overlayLayout: "card",
   cardQrPlacement: "below",
   overlaySafeArea: 32
@@ -212,7 +220,7 @@ Useful methods:
 - `setCursor({ hide, mode, idleMs })`
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
-- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, overlayLayout, cardQrPlacement, overlaySafeArea })`
+- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, freeText, showFreeText, freeTextPosition, freeTextSize, overlayLayout, cardQrPlacement, overlaySafeArea })`
 - `setQrOptions({ qrLink, showQr, qrPosition, qrSize, cardQrPlacement, overlaySafeArea })`
 - `setOverlayLayout("separate" | "card")`
 - `setOverlaySafeArea(pixels)`
@@ -415,7 +423,7 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 
 The panel is designed to fit within the screen height. Runtime, Overlay, and Playlist controls are separated into tabs so title, QR, hash recording, and playlist setup do not crowd the kiosk diagnostics.
 
-The Overlay tab can display title and QR independently as floating overlays or together as a single exhibition-label card. In Card mode, Title Position places the card on screen, while QR in Card places the QR above, below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
+The Overlay tab can display title, free text, and QR independently as floating overlays or together as a single exhibition-label card. In Card mode, Title Position places the card on screen, free text always sits below the title, and QR in Card places the QR above, below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
 
 **Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR settings, playlist URLs, intervals, kiosk locks, accessibility, watchdog, logging, and health check settings. **Load JSON** imports that file back into the runtime and refreshes the panel.
 
@@ -432,6 +440,10 @@ createExhibitionMode({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  freeText: "",
+  showFreeText: false,
+  freeTextPosition: "bottom-left",
+  freeTextSize: 10,
   overlayLayout: "separate",
   cardQrPlacement: "below",
   overlaySafeArea: 18,

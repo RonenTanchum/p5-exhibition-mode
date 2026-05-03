@@ -8,6 +8,10 @@ export type ExhibitionModeOptions = {
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
   titleOverlayBold?: boolean;
+  freeText?: string;
+  showFreeText?: boolean;
+  freeTextPosition?: ExhibitionOverlayPosition;
+  freeTextSize?: number;
   overlayLayout?: ExhibitionOverlayLayout;
   cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
@@ -68,6 +72,10 @@ export type ExhibitionArtworkMetadataOptions = {
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
   titleOverlayBold?: boolean;
+  freeText?: string;
+  showFreeText?: boolean;
+  freeTextPosition?: ExhibitionOverlayPosition;
+  freeTextSize?: number;
   overlayLayout?: ExhibitionOverlayLayout;
   cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
@@ -175,6 +183,10 @@ export type ExhibitionDiagnostics = {
   titleOverlayPosition: ExhibitionOverlayPosition;
   titleOverlaySize: number;
   titleOverlayBold: boolean;
+  freeText: string;
+  freeTextVisible: boolean;
+  freeTextPosition: ExhibitionOverlayPosition;
+  freeTextSize: number;
   overlayLayout: ExhibitionOverlayLayout;
   cardQrPlacement: ExhibitionCardQrPlacement;
   overlaySafeArea: number;

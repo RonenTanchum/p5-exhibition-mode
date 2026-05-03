@@ -817,6 +817,7 @@ function createPanel(config, api) {
   const panel = document.createElement("aside");
   panel.id = PANEL_ID;
   panel.hidden = true;
+  panel.__p5emApi = api;
   panel.setAttribute("aria-label", "p5 Exhibition Mode diagnostics");
   panel.innerHTML = `
     <div class="p5em-panel-header">
@@ -887,7 +888,7 @@ function createPanel(config, api) {
           </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Preview loads the selected row immediately. Browse is temporary and does not save a filesystem path.</p>
+        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Drop HTML previews a temporary local file; it cannot save a filesystem path.</p>
       </section>
     </div>
     <div class="p5em-panel-actions">
@@ -974,9 +975,7 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "playlist-file") {
       const file = event.target.files?.[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      api.previewPlaylistUrl(url);
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      previewDroppedHtml(file, api);
       event.target.value = "";
     }
   });
@@ -1047,9 +1046,24 @@ function addPlaylistRow(panel, value = "") {
     <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
     <button type="button" data-action="playlist-preview">Preview</button>
     <button type="button" data-action="playlist-browse">Browse</button>
-    <input data-input="playlist-file" type="file" accept=".html,text/html" hidden>
+    <label class="p5em-drop-zone">
+      <span>Drop HTML</span>
+      <input data-input="playlist-file" type="file" accept=".html,text/html">
+    </label>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
   `;
+  const dropZone = row.querySelector(".p5em-drop-zone");
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropZone.classList.add("is-dragging");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("is-dragging"));
+  dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("is-dragging");
+    const file = Array.from(event.dataTransfer?.files || []).find((item) => item.type === "text/html" || item.name.toLowerCase().endsWith(".html"));
+    if (file) previewDroppedHtml(file, panel.__p5emApi);
+  });
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
     container.dataset.editing = "true";
   });
@@ -1068,6 +1082,12 @@ function updatePlaylistRowKind(row, kind) {
   if (input) {
     input.placeholder = kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
   }
+}
+
+function previewDroppedHtml(file, api) {
+  const url = URL.createObjectURL(file);
+  api.previewPlaylistUrl(url);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 async function openPlaylistBrowser(row, config, api) {
@@ -1393,7 +1413,7 @@ function injectStyles() {
     }
     .p5em-playlist-row {
       display: grid;
-      grid-template-columns: 104px minmax(0, 1fr) auto auto 26px;
+      grid-template-columns: 104px minmax(0, 1fr) auto auto auto 26px;
       gap: 7px;
       align-items: center;
     }
@@ -1419,6 +1439,34 @@ function injectStyles() {
       font-size: 9px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
+      cursor: pointer;
+    }
+    .p5em-drop-zone {
+      position: relative;
+      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 27px;
+      padding: 0 8px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.04);
+      border: 1px dashed rgba(255,255,255,0.24);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .p5em-drop-zone.is-dragging {
+      color: rgba(255,255,255,0.95);
+      border-color: rgba(255,255,255,0.62);
+      background: rgba(255,255,255,0.1);
+    }
+    .p5em-drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
       cursor: pointer;
     }
     .p5em-playlist-row button[aria-label] {

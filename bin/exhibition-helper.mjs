@@ -9,6 +9,8 @@ const args = parseArgs(process.argv.slice(2));
 const root = path.resolve(args.root || process.cwd());
 const port = Number(args.port || process.env.PORT || DEFAULT_PORT);
 const host = args.host || "127.0.0.1";
+const absolutePrefix = "/__p5em/abs/";
+const allowedRoots = uniquePaths([root, path.dirname(root), ...asArray(args.allow)].map((entry) => path.resolve(entry)));
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -35,6 +37,10 @@ const server = createServer(async (request, response) => {
       sendJson(response, { root, files });
       return;
     }
+    if (url.pathname.startsWith(absolutePrefix)) {
+      await serveAbsolute(url.pathname, response);
+      return;
+    }
     await serveStatic(root, url.pathname, response);
   } catch (error) {
     response.writeHead(error.statusCode || 500, { "content-type": "text/plain; charset=utf-8" });
@@ -44,8 +50,10 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, host, () => {
   console.log(`Exhibition helper serving ${root}`);
+  console.log(`Allowed local roots: ${allowedRoots.join(", ")}`);
   console.log(`Open http://${host}:${port}/`);
   console.log(`HTML index endpoint http://${host}:${port}/__p5em/files`);
+  console.log(`Absolute file endpoint http://${host}:${port}${absolutePrefix}<absolute-path-without-leading-slash>`);
 });
 
 function parseArgs(argv) {
@@ -55,6 +63,10 @@ function parseArgs(argv) {
     if (arg === "--root") parsed.root = argv[++i];
     else if (arg === "--port") parsed.port = argv[++i];
     else if (arg === "--host") parsed.host = argv[++i];
+    else if (arg === "--allow") {
+      parsed.allow = parsed.allow || [];
+      parsed.allow.push(argv[++i]);
+    }
   }
   return parsed;
 }
@@ -95,17 +107,32 @@ async function serveStatic(baseDir, pathname, response) {
   const decoded = decodeURIComponent(pathname);
   const requested = decoded === "/" ? "/index.html" : decoded;
   const filePath = path.resolve(baseDir, `.${requested}`);
-  if (!filePath.startsWith(baseDir)) {
+  if (!isInside(filePath, baseDir)) {
     const error = new Error("Forbidden");
     error.statusCode = 403;
     throw error;
   }
 
+  return serveFileOrDirectory(filePath, response);
+}
+
+async function serveAbsolute(pathname, response) {
+  const localPath = path.resolve("/", decodeURIComponent(pathname.slice(absolutePrefix.length)));
+  if (!allowedRoots.some((allowedRoot) => isInside(localPath, allowedRoot))) {
+    const error = new Error(`Forbidden local path. Start the helper with --allow "${path.dirname(localPath)}" if this folder should be served.`);
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return serveFileOrDirectory(localPath, response);
+}
+
+async function serveFileOrDirectory(filePath, response) {
   let stat;
   try {
     stat = await fs.stat(filePath);
     if (stat.isDirectory()) {
-      return serveStatic(baseDir, path.posix.join(pathname, "index.html"), response);
+      return serveFileOrDirectory(path.join(filePath, "index.html"), response);
     }
   } catch {
     const error = new Error("Not found");
@@ -120,6 +147,21 @@ async function serveStatic(baseDir, pathname, response) {
     "cache-control": "no-store"
   });
   createReadStream(filePath).pipe(response);
+}
+
+function isInside(filePath, baseDir) {
+  const resolvedFile = path.resolve(filePath);
+  const resolvedBase = path.resolve(baseDir);
+  return resolvedFile === resolvedBase || resolvedFile.startsWith(`${resolvedBase}${path.sep}`);
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function uniquePaths(paths) {
+  return Array.from(new Set(paths));
 }
 
 function sendJson(response, data) {

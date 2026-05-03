@@ -68,6 +68,7 @@ const DEFAULTS = {
   },
   localFiles: {
     endpoint: "/__p5em/files",
+    absolutePrefix: "/__p5em/abs/",
     fallbackFilePreview: true
   },
   persist: true,
@@ -782,7 +783,7 @@ export function createExhibitionMode(options = {}) {
     const now = performance.now();
     if (!options.keepUrlTimer) state.playlistLastChangeAt = now;
     state.playlistLastHashAt = now;
-    const url = buildPlaylistUrl(items[state.playlistIndex], playlistConfig());
+    const url = buildPlaylistUrl(resolvePlaylistItem(items[state.playlistIndex]), playlistConfig());
     updateCurrentSource(url, playlistConfig().hashParam || "hash");
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
@@ -795,7 +796,7 @@ export function createExhibitionMode(options = {}) {
     const cleanUrl = String(url || "").trim();
     if (!cleanUrl) return null;
     ensurePlaylistFrame();
-    const builtUrl = buildPlaylistUrl(cleanUrl, playlistConfig());
+    const builtUrl = buildPlaylistUrl(resolvePlaylistItem(cleanUrl), playlistConfig());
     updateCurrentSource(builtUrl, playlistConfig().hashParam || "hash");
     state.playlistFrame.src = builtUrl;
     state.playlistFrame.hidden = false;
@@ -803,6 +804,19 @@ export function createExhibitionMode(options = {}) {
     document.documentElement.classList.add("p5em-playlist-active");
     updatePanel();
     return state.playlistFrame.src;
+  }
+
+  function resolvePlaylistItem(input) {
+    if (typeof input === "string") return resolveLocalPathUrl(input);
+    if (input && typeof input === "object" && input.url) return { ...input, url: resolveLocalPathUrl(input.url) };
+    return input;
+  }
+
+  function resolveLocalPathUrl(value) {
+    const url = String(value || "").trim();
+    if (!isAbsoluteLocalPath(url)) return url;
+    const localConfig = { ...DEFAULTS.localFiles, ...(config.localFiles || {}) };
+    return absolutePathToHelperUrl(url, localConfig.absolutePrefix);
   }
 
   function nextPlaylistItem() {
@@ -1856,6 +1870,25 @@ function collectPlaylistRows(panel) {
 
 function isLikelyRemoteUrl(value) {
   return /^(https?:|blob:|about:)/i.test(String(value || "").trim());
+}
+
+function isAbsoluteLocalPath(value) {
+  const text = String(value || "").trim();
+  return /^\/[^/]/.test(text) && !isLikelyRemoteUrl(text);
+}
+
+function absolutePathToHelperUrl(value, prefix = "/__p5em/abs/") {
+  const text = String(value || "").trim();
+  const match = text.match(/^([^?#]*)([?#].*)?$/);
+  const pathPart = match?.[1] || text;
+  const suffix = match?.[2] || "";
+  const base = String(prefix || "/__p5em/abs/").endsWith("/") ? String(prefix || "/__p5em/abs/") : `${prefix}/`;
+  const encodedPath = pathPart
+    .replace(/^\/+/, "")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${base}${encodedPath}${suffix}`;
 }
 
 function injectStyles() {

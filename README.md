@@ -106,6 +106,7 @@ const exhibition = createExhibitionMode({
   refreshOnRotation: true,
   localFiles: {
     endpoint: "/__p5em/files",
+    absolutePrefix: "/__p5em/abs/",
     fallbackFilePreview: true
   },
   watchdog: {
@@ -231,6 +232,7 @@ Useful methods:
 - `nextPlaylistItem()`, `previousPlaylistItem()`, `previewPlaylistUrl(url)`
 - `getConfig()`, `loadConfig(config)`, `saveConfig()`, `exportConfig()`
 - `localFiles.endpoint` can point at a helper endpoint such as `/__p5em/files`
+- `localFiles.absolutePrefix` maps absolute local paths through the helper, for example `/Users/me/art/index.html` becomes `/__p5em/abs/Users/me/art/index.html`
 
 QR codes are generated as image URLs through `qrProvider` by default. Override `qrProvider` if you want to route QR generation through your own local/offline service.
 
@@ -266,13 +268,25 @@ You can also edit the playlist directly inside the runtime panel:
 2. Open the **Playlist** tab.
 3. Use `+` to add a row or `-` to remove one.
 4. Choose **URL** or **Local path** for each row.
-5. Type a served local HTML path or full web URL.
+5. Type a served local HTML path, an absolute local HTML path, or a full web URL.
 6. Click **Apply URLs** to persist the playlist and runtime settings in browser storage.
 7. Enable **Playlist Mode**.
 8. Set **Playlist Interval** using seconds, minutes, or hours.
 9. Set **Hash Interval** separately when Random `?hash=` should reseed the current URL faster or slower than the URL rotation.
 10. Use **Preview** on any row to load that entry into the iframe immediately.
 11. Use **Drop HTML** for temporary preview of a local HTML file.
+
+Absolute local paths only work when the page is running through the Exhibition helper. The helper serves the project root and its parent folder by default, so sibling artwork folders under the same `Projects` directory can be entered directly:
+
+```txt
+/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html
+```
+
+For artwork folders outside that allowed area, start the helper with an explicit allow-list:
+
+```bash
+npx p5-exhibition-helper --allow /Volumes/ArtworkDrive
+```
 
 Valid playlist entries:
 

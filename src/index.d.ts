@@ -143,6 +143,7 @@ export type ExhibitionHealthCheckOptions = {
 
 export type ExhibitionLocalFilesOptions = {
   endpoint?: string;
+  absolutePrefix?: string;
   fallbackFilePreview?: boolean;
 };
 

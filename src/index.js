@@ -1,6 +1,8 @@
 const DEFAULTS = {
   title: "Untitled Artwork",
   artist: "",
+  year: "",
+  showTitleOverlay: false,
   seed: null,
   fullscreen: true,
   kiosk: true,
@@ -99,6 +101,7 @@ export function createExhibitionMode(options = {}) {
     applyAccessibility();
     applyKioskMode();
     applyCursorMode();
+    applyTitleOverlay();
     setupPlaylist();
 
     if (config.panel) {
@@ -148,6 +151,7 @@ export function createExhibitionMode(options = {}) {
     document.documentElement.style.removeProperty("--p5em-rotation");
     state.panel?.remove();
     state.playlistFrame?.remove();
+    document.getElementById("p5em-title-overlay")?.remove();
   }
 
   function reset() {
@@ -197,6 +201,8 @@ export function createExhibitionMode(options = {}) {
     const data = {
       title: config.title,
       artist: config.artist,
+      year: config.year,
+      titleOverlayVisible: Boolean(config.showTitleOverlay),
       seed: config.seed,
       uptimeSeconds: Math.round((performance.now() - state.startedAt) / 1000),
       fps: Math.round(state.fps * 10) / 10,
@@ -398,6 +404,17 @@ export function createExhibitionMode(options = {}) {
     return api;
   }
 
+  function setArtworkMetadata(next = {}) {
+    if ("title" in next) config.title = String(next.title || "");
+    if ("artist" in next) config.artist = String(next.artist || "");
+    if ("year" in next) config.year = String(next.year || "");
+    if ("showTitleOverlay" in next) config.showTitleOverlay = Boolean(next.showTitleOverlay);
+    applyTitleOverlay();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
   function applyRotation() {
     const rotation = normalizeRotation(config.rotation);
     const sideways = rotation === 90 || rotation === 270;
@@ -422,6 +439,20 @@ export function createExhibitionMode(options = {}) {
     const a = accessibilityConfig();
     document.documentElement.classList.toggle("p5em-reduced-motion", Boolean(a.reducedMotion));
     document.documentElement.classList.toggle("p5em-high-contrast", Boolean(a.highContrast));
+  }
+
+  function applyTitleOverlay() {
+    let overlay = document.getElementById("p5em-title-overlay");
+    if (!config.showTitleOverlay) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "p5em-title-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.textContent = formatTitleOverlay(config);
   }
 
   function setupPlaylist() {
@@ -642,6 +673,7 @@ export function createExhibitionMode(options = {}) {
     applyAccessibility();
     applyKioskMode();
     applyCursorMode();
+    applyTitleOverlay();
     updateInputLockClasses();
     state.playlistEnabled = Boolean(playlistConfig().enabled && playlistItems().length);
     if (playlistItems().length && !state.playlistFrame) ensurePlaylistFrame();
@@ -718,6 +750,7 @@ export function createExhibitionMode(options = {}) {
     const d = diagnostics();
     setText("p5em-title", d.title);
     setText("p5em-artist", d.artist || "Unspecified artist");
+    setText("p5em-year", d.year || "Unspecified");
     setText("p5em-seed", d.seed ?? "Unlocked");
     setText("p5em-resolution", `${d.width} x ${d.height}`);
     setText("p5em-dpr", d.devicePixelRatio.toFixed(2));
@@ -746,6 +779,10 @@ export function createExhibitionMode(options = {}) {
     setChecked("playlist-hash", d.playlistRandomHash);
     setChecked("reduced-motion", d.reducedMotion);
     setChecked("high-contrast", d.highContrast);
+    setChecked("title-overlay", d.titleOverlayVisible);
+    setInputValue("artwork-title", d.title);
+    setInputValue("artwork-artist", d.artist);
+    setInputValue("artwork-year", d.year);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
@@ -766,6 +803,11 @@ export function createExhibitionMode(options = {}) {
   function setChecked(key, value) {
     const el = state.panel?.querySelector(`[data-toggle="${key}"]`);
     if (el) el.checked = Boolean(value);
+  }
+
+  function setInputValue(key, value) {
+    const el = state.panel?.querySelector(`[data-input="${key}"]`);
+    if (el && document.activeElement !== el) el.value = value || "";
   }
 
   function add(target, type, handler, opts) {
@@ -793,6 +835,8 @@ export function createExhibitionMode(options = {}) {
     setCursor,
     setWatchdog,
     setHealthCheck,
+    setArtworkMetadata,
+    setArtworkMetadata,
     refreshArtwork,
     togglePlaylist,
     nextPlaylistItem,
@@ -830,13 +874,26 @@ function createPanel(config, api) {
     </div>
     <div class="p5em-tab-panel is-active" data-panel="runtime" role="tabpanel">
       <div class="p5em-panel-grid">
-        ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Seed", "p5em-seed"]])}
+        ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Year", "p5em-year"], ["Seed", "p5em-seed"]])}
         ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
         ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
         ${section("Playlist", [["Status", "p5em-playlist"], ["URL Interval", "p5em-playlist-interval"], ["Hash Interval", "p5em-playlist-hash-interval"], ["Random Hash", "p5em-playlist-hash"]])}
         ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
       </div>
       <div class="p5em-panel-controls">
+        <label class="p5em-text-control">
+          <span>Artwork Title</span>
+          <input data-input="artwork-title" type="text" value="${escapeAttr(config.title)}">
+        </label>
+        <label class="p5em-text-control">
+          <span>Artist Name</span>
+          <input data-input="artwork-artist" type="text" value="${escapeAttr(config.artist)}">
+        </label>
+        <label class="p5em-text-control">
+          <span>Year</span>
+          <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
+        </label>
+        ${toggle("title-overlay", "Show title overlay")}
         ${toggle("context", "Context menu lock")}
         ${toggle("touch", "Touch gestures lock")}
         ${toggle("cursor", "Hide cursor")}
@@ -940,6 +997,7 @@ function createPanel(config, api) {
     if (toggle === "context") api.setOption("disableContextMenu", event.target.checked);
     if (toggle === "touch") api.setOption("disableTouchGestures", event.target.checked);
     if (toggle === "cursor") api.setOption("hideCursor", event.target.checked);
+    if (toggle === "title-overlay") api.setArtworkMetadata({ showTitleOverlay: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
     if (toggle === "playlist") api.togglePlaylist(event.target.checked);
@@ -963,6 +1021,15 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
+    }
+    if (event.target?.dataset?.input === "artwork-title") {
+      api.setArtworkMetadata({ title: event.target.value });
+    }
+    if (event.target?.dataset?.input === "artwork-artist") {
+      api.setArtworkMetadata({ artist: event.target.value });
+    }
+    if (event.target?.dataset?.input === "artwork-year") {
+      api.setArtworkMetadata({ year: event.target.value });
     }
     if (event.target?.dataset?.input === "playlist-kind") {
       const row = event.target.closest(".p5em-playlist-row");
@@ -1284,6 +1351,19 @@ function injectStyles() {
     .p5em-kiosk .p5em-playlist-frame {
       pointer-events: none;
     }
+    #p5em-title-overlay {
+      position: fixed;
+      left: 18px;
+      top: 16px;
+      z-index: 2147483646;
+      max-width: min(520px, calc(100vw - 36px));
+      color: rgba(255,255,255,0.86);
+      font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-shadow: 0 1px 14px rgba(0,0,0,0.7);
+      pointer-events: none;
+    }
     body > canvas {
       position: relative;
       z-index: 1;
@@ -1421,6 +1501,24 @@ function injectStyles() {
       padding-top: 10px;
       flex: 0 0 auto;
       border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-text-control {
+      display: grid;
+      gap: 5px;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .p5em-text-control input {
+      min-width: 0;
+      padding: 7px 8px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 0;
+      font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .p5em-playlist-editor {
       margin-top: 10px;
@@ -1690,6 +1788,8 @@ function serializeRuntimeConfig(config) {
   return {
     title: config.title,
     artist: config.artist,
+    year: config.year,
+    showTitleOverlay: config.showTitleOverlay,
     seed: config.seed,
     fullscreen: config.fullscreen,
     kiosk: config.kiosk,
@@ -1722,6 +1822,13 @@ function accessibilitySnapshot(accessibility = {}) {
     reducedMotion: Boolean(accessibility.reducedMotion),
     highContrast: Boolean(accessibility.highContrast)
   };
+}
+
+function formatTitleOverlay(config) {
+  const title = config.title || "Artwork Title";
+  const artist = config.artist || "Artist Name";
+  const year = config.year ? `, ${config.year}` : "";
+  return `${title} by ${artist}${year}`;
 }
 
 function safeName(name) {

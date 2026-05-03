@@ -76,6 +76,8 @@ import { createExhibitionMode } from "p5-exhibition-mode";
 const exhibition = createExhibitionMode({
   title: "Bloom Study",
   artist: "Phenomena Labs",
+  year: "2026",
+  showTitleOverlay: false,
   seed: 1842,
   fullscreen: true,
   kiosk: true,
@@ -163,6 +165,12 @@ exhibition
 
 // Later, from your own UI / socket / venue scheduler:
 exhibition.setRotation(270);
+exhibition.setArtworkMetadata({
+  title: "Classical Revival",
+  artist: "Ronen Tanchum",
+  year: "2026",
+  showTitleOverlay: true
+});
 exhibition.setPlaylistIntervalParts(20, "minutes");
 exhibition.setPlaylistHashIntervalParts(30, "seconds");
 exhibition.setPlaylistOptions({ randomHash: true });
@@ -177,6 +185,7 @@ Useful methods:
 - `setCursor({ hide, mode, idleMs })`
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
+- `setArtworkMetadata({ title, artist, year, showTitleOverlay })`
 - `setWatchdog(options)` and `setHealthCheck(options)`
 - `setPlaylistOptions(options)`, `setPlaylistItems(items)`, `togglePlaylist(value)`
 - `setPlaylistIntervalParts(value, unit)` and `setPlaylistHashIntervalParts(value, unit)`
@@ -377,6 +386,8 @@ The panel is designed to fit within the screen height. Controls are compact, and
 createExhibitionMode({
   title: "Untitled Artwork",
   artist: "",
+  year: "",
+  showTitleOverlay: false,
   seed: null,
   fullscreen: true,
   kiosk: true,

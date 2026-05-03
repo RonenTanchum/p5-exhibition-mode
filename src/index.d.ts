@@ -1,6 +1,8 @@
 export type ExhibitionModeOptions = {
   title?: string;
   artist?: string;
+  year?: string | number;
+  showTitleOverlay?: boolean;
   seed?: string | number | null;
   fullscreen?: boolean;
   kiosk?: boolean;
@@ -41,6 +43,13 @@ export type ExhibitionCursorOptions = {
   hide?: boolean;
   mode?: "always" | "idle";
   idleMs?: number;
+};
+
+export type ExhibitionArtworkMetadataOptions = {
+  title?: string;
+  artist?: string;
+  year?: string | number;
+  showTitleOverlay?: boolean;
 };
 
 export type ExhibitionAccessibilityOptions = {
@@ -94,6 +103,8 @@ export type ExhibitionPlaylistOptions = {
 export type ExhibitionDiagnostics = {
   title: string;
   artist: string;
+  year: string | number;
+  titleOverlayVisible: boolean;
   seed: string | number | null;
   uptimeSeconds: number;
   fps: number;
@@ -142,6 +153,7 @@ export type ExhibitionMode = {
   setCursor: (options: boolean | ExhibitionCursorOptions) => ExhibitionMode;
   setWatchdog: (options: ExhibitionWatchdogOptions) => ExhibitionMode;
   setHealthCheck: (options: ExhibitionHealthCheckOptions) => ExhibitionMode;
+  setArtworkMetadata: (options: ExhibitionArtworkMetadataOptions) => ExhibitionMode;
   refreshArtwork: (reason?: string) => ExhibitionMode;
   togglePlaylist: (force?: boolean) => ExhibitionMode;
   nextPlaylistItem: () => string | null;

@@ -1108,8 +1108,8 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-playlist-interval", formatInterval(d.playlistIntervalSeconds));
     setText("p5em-playlist-hash-interval", formatInterval(d.playlistHashIntervalSeconds));
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
-    setText("p5em-current-hash", d.currentHash || "None");
-    setText("p5em-current-hash-full", d.currentHash || "None");
+    setText("p5em-current-hash", d.currentHash ? shortenMiddle(d.currentHash, 16) : "None");
+    setText("p5em-current-hash-full", d.currentHash ? shortenMiddle(d.currentHash, 24) : "None");
     setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 34));
     setText("p5em-hash-recording", d.hashRecording ? "Active" : "Stopped");
     setText("p5em-hash-record-count", String(d.hashRecordCount));
@@ -3057,7 +3057,7 @@ function isTemporaryBlobUrl(value) {
 function randomHashValue() {
   const bytes = new Uint32Array(4);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("");
+  return `0x${Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("")}`;
 }
 
 function normalizeRotation(value) {

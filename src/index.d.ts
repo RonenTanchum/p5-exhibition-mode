@@ -267,6 +267,7 @@ export type ExhibitionMode = {
   setPlaylistOptions: (options: ExhibitionPlaylistOptions) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
   previewPlaylistUrl: (url: string) => string | null;
+  clearLogs: () => ExhibitionMode;
   getConfig: () => Partial<ExhibitionModeOptions>;
   loadConfig: (config: Partial<ExhibitionModeOptions>) => ExhibitionMode;
   saveConfig: () => Partial<ExhibitionModeOptions>;

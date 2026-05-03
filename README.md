@@ -432,7 +432,7 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 - **Runtime tab:** display status, input locks, accessibility controls, rotation, hash recording, watchdog, and system diagnostics.
 - **Overlay tab:** title overlay, QR code, shared safe border, font selection, and optional title + QR card layout.
 - **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
-- **Log tab:** recent runtime, browser, WebGL, watchdog, and artwork errors from the in-page log buffer.
+- **Log tab:** recent runtime, browser, WebGL, watchdog, playlist hash changes, and artwork errors from the in-page log buffer.
 - **Actions:** fullscreen, reset, screenshot, apply playlist URLs, save/load JSON, previous URL, and next URL.
 
 The panel is designed to fit within the screen height. Runtime, Overlay, and Playlist controls are separated into tabs so title, QR, hash recording, and playlist setup do not crowd the kiosk diagnostics.

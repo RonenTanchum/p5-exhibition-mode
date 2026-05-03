@@ -110,6 +110,7 @@ export function createExhibitionMode(options = {}) {
     originalConsole: {},
     currentHash: readUrlHash(new URL(window.location.href), DEFAULTS.playlist.hashParam),
     currentSource: window.location.href,
+    lastLoggedHash: "",
     hashRecording: false,
     hashRecords: []
   };
@@ -784,7 +785,7 @@ export function createExhibitionMode(options = {}) {
     if (!options.keepUrlTimer) state.playlistLastChangeAt = now;
     state.playlistLastHashAt = now;
     const url = buildPlaylistUrl(resolvePlaylistItem(items[state.playlistIndex]), playlistConfig());
-    updateCurrentSource(url, playlistConfig().hashParam || "hash");
+    updateCurrentSource(url, playlistConfig().hashParam || "hash", options.keepUrlTimer ? "hash interval" : "playlist");
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
     document.documentElement.classList.add("p5em-playlist-active");
@@ -797,7 +798,7 @@ export function createExhibitionMode(options = {}) {
     if (!cleanUrl) return null;
     ensurePlaylistFrame();
     const builtUrl = buildPlaylistUrl(resolvePlaylistItem(cleanUrl), playlistConfig());
-    updateCurrentSource(builtUrl, playlistConfig().hashParam || "hash");
+    updateCurrentSource(builtUrl, playlistConfig().hashParam || "hash", "preview");
     state.playlistFrame.src = builtUrl;
     state.playlistFrame.hidden = false;
     state.playlistLastHashAt = performance.now();
@@ -827,10 +828,22 @@ export function createExhibitionMode(options = {}) {
     return loadPlaylistItem(state.playlistIndex - 1);
   }
 
-  function updateCurrentSource(url, hashParam = "hash") {
+  function updateCurrentSource(url, hashParam = "hash", reason = "source") {
     state.currentSource = url || "";
     state.currentHash = readUrlHash(safeUrl(url), hashParam);
-    recordHashSample("source");
+    logHashChange(reason);
+    recordHashSample(reason);
+  }
+
+  function logHashChange(reason = "source") {
+    if (!state.currentHash || state.currentHash === state.lastLoggedHash) return;
+    state.lastLoggedHash = state.currentHash;
+    log("info", `Hash ${reason}: ${state.currentHash}`, {
+      hash: state.currentHash,
+      source: state.currentSource,
+      playlistIndex: state.playlistIndex,
+      reason
+    });
   }
 
   function togglePlaylist(force) {
@@ -1094,6 +1107,12 @@ export function createExhibitionMode(options = {}) {
     if (state.logs.length > max) state.logs.splice(0, state.logs.length - max);
   }
 
+  function clearLogs() {
+    state.logs = [];
+    updatePanel();
+    return api;
+  }
+
   function maybeEnterFullscreen() {
     if (config.fullscreen) enterFullscreen();
   }
@@ -1230,6 +1249,7 @@ export function createExhibitionMode(options = {}) {
     setPlaylistOptions,
     setPlaylistItems,
     previewPlaylistUrl,
+    clearLogs,
     getConfig,
     loadConfig,
     saveConfig,
@@ -1446,6 +1466,7 @@ function createPanel(config, api) {
         <div class="p5em-log-head">
           <h2>Runtime Log</h2>
           <button type="button" data-action="log-copy">Copy</button>
+          <button type="button" data-action="log-clear">Clear</button>
         </div>
         <div class="p5em-log-rows" data-log-rows></div>
       </section>
@@ -1474,6 +1495,7 @@ function createPanel(config, api) {
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
     if (action === "log-copy") copyText(JSON.stringify(api.diagnostics().logs || [], null, 2));
+    if (action === "log-clear") api.clearLogs();
     if (action === "copy-hash") copyText(api.diagnostics().currentHash || "");
     if (action === "hash-record-start") api.startHashRecording();
     if (action === "hash-record-stop") api.stopHashRecording();

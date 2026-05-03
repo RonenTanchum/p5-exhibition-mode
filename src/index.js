@@ -148,6 +148,7 @@ export function createExhibitionMode(options = {}) {
     state.panelOpen = typeof force === "boolean" ? force : !state.panelOpen;
     state.panel.hidden = !state.panelOpen;
     updatePanel();
+    if (state.panelOpen) syncPlaylistRows(state.panel, playlistItems(), { force: true });
   }
 
   async function enterFullscreen() {
@@ -432,6 +433,7 @@ export function createExhibitionMode(options = {}) {
     }
 
     updatePanel();
+    syncPlaylistRows(state.panel, normalized, { force: true });
     return api;
   }
 
@@ -524,7 +526,6 @@ export function createExhibitionMode(options = {}) {
     if (interval && document.activeElement !== interval) interval.value = d.playlistIntervalSeconds;
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
-    syncPlaylistRows(state.panel, playlistItems());
   }
 
   function setText(key, value) {
@@ -649,8 +650,16 @@ function createPanel(config, api) {
     if (action === "playlist-apply") {
       api.setPlaylistItems(collectPlaylistRows(panel));
     }
-    if (action === "playlist-add") addPlaylistRow(panel, "");
-    if (action === "playlist-remove") event.target.closest(".p5em-playlist-row")?.remove();
+    if (action === "playlist-add") {
+      addPlaylistRow(panel, "");
+      const container = panel.querySelector("[data-playlist-rows]");
+      if (container) container.dataset.dirty = "true";
+    }
+    if (action === "playlist-remove") {
+      event.target.closest(".p5em-playlist-row")?.remove();
+      const container = panel.querySelector("[data-playlist-rows]");
+      if (container) container.dataset.dirty = "true";
+    }
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
   });
@@ -676,6 +685,8 @@ function createPanel(config, api) {
       const row = event.target.closest(".p5em-playlist-row");
       const input = row?.querySelector("[data-input='playlist-url']");
       if (input) input.value = URL.createObjectURL(file);
+      const container = panel.querySelector("[data-playlist-rows]");
+      if (container) container.dataset.dirty = "true";
       event.target.value = "";
     }
   });
@@ -720,11 +731,14 @@ function activatePanelTab(panel, tab) {
   });
 }
 
-function syncPlaylistRows(panel, items) {
+function syncPlaylistRows(panel, items, options = {}) {
   const container = panel?.querySelector("[data-playlist-rows]");
-  if (!container || container.dataset.editing === "true") return;
+  if (!container || (!options.force && container.dataset.editing === "true")) return;
+  if (!options.force && container.dataset.dirty === "true") return;
   const urls = normalizePlaylistItems(items).map((item) => typeof item === "string" ? item : item.url);
   container.innerHTML = "";
+  container.dataset.dirty = "false";
+  container.dataset.editing = "false";
   (urls.length ? urls : [""]).forEach((url) => addPlaylistRow(panel, url));
 }
 
@@ -743,6 +757,9 @@ function addPlaylistRow(panel, value = "") {
   `;
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
     container.dataset.editing = "true";
+  });
+  row.querySelector("[data-input='playlist-url']").addEventListener("input", () => {
+    container.dataset.dirty = "true";
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("blur", () => {
     container.dataset.editing = "false";

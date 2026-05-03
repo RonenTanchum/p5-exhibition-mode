@@ -11,6 +11,9 @@ const exhibition = createExhibitionMode({
     intervalValue: 20,
     intervalUnit: "seconds",
     intervalSeconds: 20,
+    hashIntervalValue: 20,
+    hashIntervalUnit: "seconds",
+    hashIntervalSeconds: 20,
     randomHash: true,
     hashParam: "hash",
     items: [

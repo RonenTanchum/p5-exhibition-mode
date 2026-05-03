@@ -22,6 +22,8 @@ export type ExhibitionModeOptions = {
   logging?: ExhibitionLoggingOptions;
   healthCheck?: ExhibitionHealthCheckOptions;
   playlist?: ExhibitionPlaylistOptions | Array<string | ExhibitionPlaylistItem>;
+  persist?: boolean;
+  storageKey?: string;
   target?: HTMLElement | Document;
   onReset?: () => void;
   onScreenshot?: (dataUrl: string) => void;
@@ -60,7 +62,12 @@ export type ExhibitionPlaylistItem = {
 export type ExhibitionPlaylistOptions = {
   enabled?: boolean;
   items?: Array<string | ExhibitionPlaylistItem>;
+  intervalValue?: number;
   intervalSeconds?: number;
+  intervalUnit?: "seconds" | "minutes" | "hours";
+  hashIntervalValue?: number;
+  hashIntervalSeconds?: number;
+  hashIntervalUnit?: "seconds" | "minutes" | "hours";
   randomHash?: boolean;
   hashParam?: string;
   startIndex?: number;
@@ -90,6 +97,8 @@ export type ExhibitionDiagnostics = {
   playlistCount: number;
   playlistIntervalSeconds: number;
   playlistIntervalUnit: "seconds" | "minutes" | "hours";
+  playlistHashIntervalSeconds: number;
+  playlistHashIntervalUnit: "seconds" | "minutes" | "hours";
   playlistRandomHash: boolean;
   reloadCount: number;
   memoryMB: number | null;
@@ -115,8 +124,11 @@ export type ExhibitionMode = {
   previousPlaylistItem: () => string | null;
   setPlaylistInterval: (seconds: number | string) => ExhibitionMode;
   setPlaylistIntervalParts: (value: number | string, unit: "seconds" | "minutes" | "hours") => ExhibitionMode;
+  setPlaylistHashIntervalParts: (value: number | string, unit: "seconds" | "minutes" | "hours") => ExhibitionMode;
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
+  previewPlaylistUrl: (url: string) => string | null;
+  exportConfig: () => Partial<ExhibitionModeOptions>;
 };
 
 export function createExhibitionMode(options?: ExhibitionModeOptions): ExhibitionMode;

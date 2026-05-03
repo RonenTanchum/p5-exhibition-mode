@@ -25,6 +25,9 @@
     "intervalValue": 2,
     "intervalUnit": "minutes",
     "intervalSeconds": 120,
+    "hashIntervalValue": 2,
+    "hashIntervalUnit": "minutes",
+    "hashIntervalSeconds": 120,
     "randomHash": true,
     "hashParam": "hash",
     "items": [

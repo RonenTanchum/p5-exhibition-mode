@@ -41,10 +41,14 @@ const DEFAULTS = {
     items: [],
     intervalSeconds: 120,
     intervalUnit: "seconds",
+    hashIntervalSeconds: 120,
+    hashIntervalUnit: "seconds",
     randomHash: false,
     hashParam: "hash",
     startIndex: 0
   },
+  persist: true,
+  storageKey: "p5-exhibition-mode-config",
   target: null
 };
 
@@ -54,7 +58,9 @@ const PANEL_ID = "p5-exhibition-mode-panel";
 const STYLE_ID = "p5-exhibition-mode-style";
 
 export function createExhibitionMode(options = {}) {
-  const config = { ...DEFAULTS, ...options };
+  const baseConfig = mergeRuntimeConfig(DEFAULTS, options);
+  const savedConfig = baseConfig.persist ? readRuntimeConfig(baseConfig.storageKey) : null;
+  const config = savedConfig ? mergeRuntimeConfig(baseConfig, savedConfig) : baseConfig;
   const state = {
     startedAt: performance.now(),
     lastFrameAt: performance.now(),
@@ -69,6 +75,7 @@ export function createExhibitionMode(options = {}) {
     playlistEnabled: false,
     playlistIndex: 0,
     playlistLastChangeAt: performance.now(),
+    playlistLastHashAt: performance.now(),
     lowFpsSince: null,
     droppedFrames: 0,
     logs: [],
@@ -208,6 +215,8 @@ export function createExhibitionMode(options = {}) {
       playlistCount: playlistItems().length,
       playlistIntervalSeconds: playlistIntervalSeconds(),
       playlistIntervalUnit: playlistConfig().intervalUnit,
+      playlistHashIntervalSeconds: playlistHashIntervalSeconds(),
+      playlistHashIntervalUnit: playlistConfig().hashIntervalUnit,
       playlistRandomHash: Boolean(playlistConfig().randomHash),
       reloadCount: state.reloadCount,
       memoryMB: memory
@@ -309,6 +318,7 @@ export function createExhibitionMode(options = {}) {
       applyRotation();
       if (config.refreshOnRotation) refreshArtwork("rotation");
     }
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -318,6 +328,7 @@ export function createExhibitionMode(options = {}) {
     config.rotation = normalizeRotation(degrees);
     applyRotation();
     if (config.refreshOnRotation && previous !== config.rotation) refreshArtwork("rotation");
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -325,12 +336,17 @@ export function createExhibitionMode(options = {}) {
   function setAccessibility(next = {}) {
     config.accessibility = { ...accessibilityConfig(), ...next };
     applyAccessibility();
+    persistConfig();
     updatePanel();
     return api;
   }
 
   function applyRotation() {
-    document.documentElement.style.setProperty("--p5em-rotation", `${normalizeRotation(config.rotation)}deg`);
+    const rotation = normalizeRotation(config.rotation);
+    const sideways = rotation === 90 || rotation === 270;
+    document.documentElement.style.setProperty("--p5em-rotation", `${rotation}deg`);
+    document.documentElement.style.setProperty("--p5em-frame-width", sideways ? "100vh" : "100vw");
+    document.documentElement.style.setProperty("--p5em-frame-height", sideways ? "100vw" : "100vh");
   }
 
   function refreshArtwork(reason = "manual") {
@@ -357,21 +373,31 @@ export function createExhibitionMode(options = {}) {
     state.playlistIndex = Math.max(0, playlist.startIndex || 0) % Math.max(1, playlistItems().length);
     if (!playlistItems().length) return;
 
+    ensurePlaylistFrame();
+
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+  }
+
+  function ensurePlaylistFrame() {
+    if (state.playlistFrame) return state.playlistFrame;
     state.playlistFrame = document.createElement("iframe");
     state.playlistFrame.className = "p5em-playlist-frame";
     state.playlistFrame.title = "Exhibition playlist artwork";
     state.playlistFrame.setAttribute("allow", "autoplay; fullscreen");
     state.playlistFrame.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
-    state.playlistFrame.hidden = !state.playlistEnabled;
+    state.playlistFrame.hidden = true;
     document.body.prepend(state.playlistFrame);
-
-    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    return state.playlistFrame;
   }
 
   function tickPlaylist(now) {
     if (!state.playlistEnabled || !state.playlistFrame) return;
     const interval = playlistIntervalSeconds() * 1000;
     if (now - state.playlistLastChangeAt >= interval) nextPlaylistItem();
+    const playlist = playlistConfig();
+    if (playlist.randomHash && now - state.playlistLastHashAt >= playlistHashIntervalSeconds() * 1000) {
+      loadPlaylistItem(state.playlistIndex, { keepUrlTimer: true });
+    }
   }
 
   function playlistConfig() {
@@ -405,17 +431,38 @@ export function createExhibitionMode(options = {}) {
     return Math.max(5, Number(playlist.intervalSeconds) || 120);
   }
 
-  function loadPlaylistItem(index = state.playlistIndex) {
+  function playlistHashIntervalSeconds() {
+    const playlist = playlistConfig();
+    if (playlist.hashIntervalUnit) return intervalToSeconds(playlist.hashIntervalValue ?? playlist.hashIntervalSeconds, playlist.hashIntervalUnit);
+    return Math.max(5, Number(playlist.hashIntervalSeconds) || playlistIntervalSeconds());
+  }
+
+  function loadPlaylistItem(index = state.playlistIndex, options = {}) {
     const items = playlistItems();
-    if (!items.length || !state.playlistFrame) return null;
+    if (!items.length) return null;
+    ensurePlaylistFrame();
     state.playlistIndex = ((index % items.length) + items.length) % items.length;
-    state.playlistLastChangeAt = performance.now();
+    const now = performance.now();
+    if (!options.keepUrlTimer) state.playlistLastChangeAt = now;
+    state.playlistLastHashAt = now;
     const url = buildPlaylistUrl(items[state.playlistIndex], playlistConfig());
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
     document.documentElement.classList.add("p5em-playlist-active");
     updatePanel();
     return url;
+  }
+
+  function previewPlaylistUrl(url) {
+    const cleanUrl = String(url || "").trim();
+    if (!cleanUrl) return null;
+    ensurePlaylistFrame();
+    state.playlistFrame.src = buildPlaylistUrl(cleanUrl, playlistConfig());
+    state.playlistFrame.hidden = false;
+    state.playlistLastHashAt = performance.now();
+    document.documentElement.classList.add("p5em-playlist-active");
+    updatePanel();
+    return state.playlistFrame.src;
   }
 
   function nextPlaylistItem() {
@@ -428,9 +475,11 @@ export function createExhibitionMode(options = {}) {
 
   function togglePlaylist(force) {
     state.playlistEnabled = typeof force === "boolean" ? force : !state.playlistEnabled;
+    config.playlist = { ...playlistConfig(), enabled: state.playlistEnabled };
     if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
     document.documentElement.classList.toggle("p5em-playlist-active", Boolean(state.playlistEnabled));
     if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -438,6 +487,7 @@ export function createExhibitionMode(options = {}) {
   function setPlaylistInterval(seconds) {
     config.playlist = { ...playlistConfig(), intervalSeconds: Math.max(5, Number(seconds) || 120), intervalUnit: "seconds" };
     state.playlistLastChangeAt = performance.now();
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -452,6 +502,22 @@ export function createExhibitionMode(options = {}) {
       intervalSeconds: intervalToSeconds(intervalValue, normalizedUnit)
     };
     state.playlistLastChangeAt = performance.now();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setPlaylistHashIntervalParts(value, unit) {
+    const normalizedUnit = normalizeIntervalUnit(unit);
+    const hashIntervalValue = Math.max(1, Number(value) || 1);
+    config.playlist = {
+      ...playlistConfig(),
+      hashIntervalValue,
+      hashIntervalUnit: normalizedUnit,
+      hashIntervalSeconds: intervalToSeconds(hashIntervalValue, normalizedUnit)
+    };
+    state.playlistLastHashAt = performance.now();
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -459,6 +525,7 @@ export function createExhibitionMode(options = {}) {
   function setPlaylistRandomHash(value) {
     config.playlist = { ...playlistConfig(), randomHash: Boolean(value) };
     if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    persistConfig();
     updatePanel();
     return api;
   }
@@ -479,7 +546,20 @@ export function createExhibitionMode(options = {}) {
 
     updatePanel();
     syncPlaylistRows(state.panel, normalized, { force: true });
+    persistConfig();
     return api;
+  }
+
+  function persistConfig() {
+    if (!config.persist) return;
+    writeRuntimeConfig(config.storageKey, serializeRuntimeConfig(config));
+  }
+
+  function exportConfig() {
+    const snapshot = serializeRuntimeConfig(config);
+    persistConfig();
+    downloadJson(snapshot, `${safeName(config.title || "p5-exhibition-mode")}-runtime-config.json`);
+    return snapshot;
   }
 
   function tickWatchdog(now) {
@@ -556,6 +636,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-logs", String(d.logCount));
     setText("p5em-playlist", d.playlistEnabled ? `${d.playlistIndex + 1} / ${d.playlistCount}` : "Inactive");
     setText("p5em-playlist-interval", formatInterval(d.playlistIntervalSeconds));
+    setText("p5em-playlist-hash-interval", formatInterval(d.playlistHashIntervalSeconds));
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
@@ -571,6 +652,10 @@ export function createExhibitionMode(options = {}) {
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
     if (intervalUnit && document.activeElement !== intervalUnit) intervalUnit.value = normalizeIntervalUnit(playlistConfig().intervalUnit);
+    const hashInterval = state.panel.querySelector("[data-input='playlist-hash-interval']");
+    if (hashInterval && document.activeElement !== hashInterval) hashInterval.value = playlistConfig().hashIntervalValue ?? intervalDisplayValue(d.playlistHashIntervalSeconds, playlistConfig().hashIntervalUnit);
+    const hashIntervalUnit = state.panel.querySelector("[data-input='playlist-hash-interval-unit']");
+    if (hashIntervalUnit && document.activeElement !== hashIntervalUnit) hashIntervalUnit.value = normalizeIntervalUnit(playlistConfig().hashIntervalUnit);
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
   }
@@ -610,8 +695,11 @@ export function createExhibitionMode(options = {}) {
     previousPlaylistItem,
     setPlaylistInterval,
     setPlaylistIntervalParts,
+    setPlaylistHashIntervalParts,
     setPlaylistRandomHash,
-    setPlaylistItems
+    setPlaylistItems,
+    previewPlaylistUrl,
+    exportConfig
   };
 
   return api;
@@ -624,7 +712,7 @@ function createPanel(config, api) {
   panel.setAttribute("aria-label", "p5 Exhibition Mode diagnostics");
   panel.innerHTML = `
     <div class="p5em-panel-header">
-      <span>Phenomena Exhibition Mode</span>
+      <span>Exhibition Mode</span>
       <button type="button" data-action="close" aria-label="Close panel">×</button>
     </div>
     <div class="p5em-tabs" role="tablist" aria-label="Runtime panel sections">
@@ -636,7 +724,7 @@ function createPanel(config, api) {
         ${section("Artwork", [["Title", "p5em-title"], ["Artist", "p5em-artist"], ["Seed", "p5em-seed"]])}
         ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
         ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
-        ${section("Playlist", [["Status", "p5em-playlist"], ["Interval", "p5em-playlist-interval"], ["Random Hash", "p5em-playlist-hash"]])}
+        ${section("Playlist", [["Status", "p5em-playlist"], ["URL Interval", "p5em-playlist-interval"], ["Hash Interval", "p5em-playlist-hash-interval"], ["Random Hash", "p5em-playlist-hash"]])}
         ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
       </div>
       <div class="p5em-panel-controls">
@@ -677,9 +765,21 @@ function createPanel(config, api) {
               <option value="hours">Hours</option>
             </select>
           </label>
+          <label class="p5em-number-control">
+            <span>Hash Interval</span>
+            <input data-input="playlist-hash-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).hashIntervalSeconds}">
+          </label>
+          <label class="p5em-number-control">
+            <span>Hash Unit</span>
+            <select data-input="playlist-hash-interval-unit">
+              <option value="seconds">Seconds</option>
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+            </select>
+          </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Use a local HTML path, full web URL, or browse for a temporary HTML file.</p>
+        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Preview loads the selected row immediately.</p>
       </section>
     </div>
     <div class="p5em-panel-actions">
@@ -688,6 +788,7 @@ function createPanel(config, api) {
       <button type="button" data-action="screenshot">Screenshot</button>
       <button type="button" data-action="diagnostics">Diagnostics</button>
       <button type="button" data-action="playlist-apply">Apply URLs</button>
+      <button type="button" data-action="playlist-save-json">Save JSON</button>
       <button type="button" data-action="playlist-prev">Prev URL</button>
       <button type="button" data-action="playlist-next">Next URL</button>
     </div>
@@ -706,6 +807,7 @@ function createPanel(config, api) {
     if (action === "playlist-apply") {
       api.setPlaylistItems(collectPlaylistRows(panel));
     }
+    if (action === "playlist-save-json") api.exportConfig();
     if (action === "playlist-add") {
       addPlaylistRow(panel, "");
       const container = panel.querySelector("[data-playlist-rows]");
@@ -715,6 +817,11 @@ function createPanel(config, api) {
       event.target.closest(".p5em-playlist-row")?.remove();
       const container = panel.querySelector("[data-playlist-rows]");
       if (container) container.dataset.dirty = "true";
+    }
+    if (action === "playlist-preview") {
+      const row = event.target.closest(".p5em-playlist-row");
+      const input = row?.querySelector("[data-input='playlist-url']");
+      if (input?.value) api.previewPlaylistUrl(input.value);
     }
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
@@ -737,18 +844,23 @@ function createPanel(config, api) {
       const value = panel.querySelector("[data-input='playlist-interval']")?.value || 1;
       api.setPlaylistIntervalParts(value, event.target.value);
     }
+    if (event.target?.dataset?.input === "playlist-hash-interval") {
+      const unit = panel.querySelector("[data-input='playlist-hash-interval-unit']")?.value || "seconds";
+      api.setPlaylistHashIntervalParts(event.target.value, unit);
+    }
+    if (event.target?.dataset?.input === "playlist-hash-interval-unit") {
+      const value = panel.querySelector("[data-input='playlist-hash-interval']")?.value || 1;
+      api.setPlaylistHashIntervalParts(value, event.target.value);
+    }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
     }
-    if (event.target?.dataset?.input === "playlist-file") {
-      const file = event.target.files?.[0];
-      if (!file) return;
+    if (event.target?.dataset?.input === "playlist-kind") {
       const row = event.target.closest(".p5em-playlist-row");
       const input = row?.querySelector("[data-input='playlist-url']");
-      if (input) input.value = URL.createObjectURL(file);
-      const container = panel.querySelector("[data-playlist-rows]");
-      if (container) container.dataset.dirty = "true";
-      event.target.value = "";
+      if (input) {
+        input.placeholder = event.target.value === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
+      }
     }
   });
   syncPlaylistRows(panel, playlistConfigFrom(config).items);
@@ -808,12 +920,14 @@ function addPlaylistRow(panel, value = "") {
   if (!container) return;
   const row = document.createElement("div");
   row.className = "p5em-playlist-row";
+  const kind = isLikelyRemoteUrl(value) ? "url" : "local";
   row.innerHTML = `
-    <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="./local-sketch/index.html or https://...">
-    <label>
-      <span>Browse</span>
-      <input data-input="playlist-file" type="file" accept=".html,text/html">
-    </label>
+    <select data-input="playlist-kind" aria-label="Playlist item type">
+      <option value="url"${kind === "url" ? " selected" : ""}>URL</option>
+      <option value="local"${kind === "local" ? " selected" : ""}>Local path</option>
+    </select>
+    <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
+    <button type="button" data-action="playlist-preview">Preview</button>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
   `;
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
@@ -832,6 +946,10 @@ function collectPlaylistRows(panel) {
   return Array.from(panel.querySelectorAll("[data-input='playlist-url']"))
     .map((input) => input.value.trim())
     .filter(Boolean);
+}
+
+function isLikelyRemoteUrl(value) {
+  return /^(https?:|blob:|about:)/i.test(String(value || "").trim());
 }
 
 function injectStyles() {
@@ -887,19 +1005,22 @@ function injectStyles() {
     }
     .p5em-playlist-frame {
       position: fixed;
-      inset: 0;
+      left: 50%;
+      top: 50%;
       z-index: 2;
-      width: 100vw;
-      height: 100vh;
+      width: var(--p5em-frame-width, 100vw);
+      height: var(--p5em-frame-height, 100vh);
       border: 0;
       background: #050505;
-      transform: rotate(var(--p5em-rotation, 0deg));
+      transform: translate(-50%, -50%) rotate(var(--p5em-rotation, 0deg));
       transform-origin: center center;
     }
     .p5em-playlist-frame[hidden] {
       display: none;
     }
-    .p5em-playlist-active body > canvas {
+    .p5em-playlist-active body > canvas,
+    .p5em-playlist-active body main canvas,
+    .p5em-playlist-active body .p5Canvas {
       opacity: 0 !important;
       visibility: hidden !important;
       pointer-events: none !important;
@@ -1092,11 +1213,12 @@ function injectStyles() {
     }
     .p5em-playlist-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto 26px;
+      grid-template-columns: 104px minmax(0, 1fr) auto 26px;
       gap: 7px;
       align-items: center;
     }
-    .p5em-playlist-row input[type="text"] {
+    .p5em-playlist-row input[type="text"],
+    .p5em-playlist-row select {
       min-width: 0;
       padding: 7px 8px;
       color: rgba(255,255,255,0.9);
@@ -1105,14 +1227,10 @@ function injectStyles() {
       border-radius: 0;
       font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    .p5em-playlist-row label {
-      position: relative;
-      overflow: hidden;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+    .p5em-playlist-row button {
       padding: 7px 8px;
       color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.18);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -1120,16 +1238,11 @@ function injectStyles() {
       text-transform: uppercase;
       cursor: pointer;
     }
-    .p5em-playlist-row input[type="file"] {
-      position: absolute;
-      inset: 0;
-      opacity: 0;
-      cursor: pointer;
-    }
-    .p5em-playlist-row button {
+    .p5em-playlist-row button[aria-label] {
       width: 26px;
       height: 27px;
       line-height: 1;
+      padding: 0;
     }
     .p5em-playlist-editor p {
       margin: 6px 0 0;
@@ -1256,6 +1369,75 @@ function writeReloadCount(count) {
   sessionStorage.setItem("p5em-reload-count", String(count));
 }
 
+function readRuntimeConfig(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimeConfig(storageKey, config) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(config));
+  } catch {
+    // Storage can be unavailable in private browsing or locked-down kiosk shells.
+  }
+}
+
+function mergeRuntimeConfig(base, next = {}) {
+  const playlist = Array.isArray(next.playlist)
+    ? next.playlist
+    : { ...(base.playlist || {}), ...(next.playlist || {}) };
+  return {
+    ...base,
+    ...next,
+    accessibility: { ...(base.accessibility || {}), ...(next.accessibility || {}) },
+    watchdog: { ...(base.watchdog || {}), ...(next.watchdog || {}) },
+    logging: { ...(base.logging || {}), ...(next.logging || {}) },
+    healthCheck: { ...(base.healthCheck || {}), ...(next.healthCheck || {}) },
+    playlist
+  };
+}
+
+function serializeRuntimeConfig(config) {
+  return {
+    title: config.title,
+    artist: config.artist,
+    seed: config.seed,
+    fullscreen: config.fullscreen,
+    kiosk: config.kiosk,
+    disableContextMenu: config.disableContextMenu,
+    disableTouchGestures: config.disableTouchGestures,
+    preventScroll: config.preventScroll,
+    hideCursor: config.hideCursor,
+    hideCursorMode: config.hideCursorMode,
+    cursorIdleMs: config.cursorIdleMs,
+    idleReset: config.idleReset,
+    maxPixelRatio: config.maxPixelRatio,
+    monitor: config.monitor,
+    panel: config.panel,
+    panelKey: config.panelKey,
+    rotation: config.rotation,
+    refreshOnRotation: config.refreshOnRotation,
+    accessibility: accessibilitySnapshot(config.accessibility),
+    watchdog: { ...config.watchdog },
+    logging: { ...config.logging },
+    healthCheck: { ...config.healthCheck },
+    playlist: Array.isArray(config.playlist) ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist } : { ...config.playlist },
+    persist: config.persist,
+    storageKey: config.storageKey
+  };
+}
+
+function accessibilitySnapshot(accessibility = {}) {
+  return {
+    reducedMotion: Boolean(accessibility.reducedMotion),
+    highContrast: Boolean(accessibility.highContrast)
+  };
+}
+
 function safeName(name) {
   return String(name || "artwork").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -1265,6 +1447,16 @@ function downloadDataUrl(dataUrl, filename) {
   a.href = dataUrl;
   a.download = filename;
   a.click();
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function copyDiagnostics(data) {
@@ -1307,11 +1499,15 @@ function normalizePlaylistItems(items) {
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => {
-      if (typeof item === "string") return item.trim();
-      if (item && typeof item === "object" && item.url) return item;
+      if (typeof item === "string") return isTemporaryBlobUrl(item) ? null : item.trim();
+      if (item && typeof item === "object" && item.url && !isTemporaryBlobUrl(item.url)) return item;
       return null;
     })
     .filter(Boolean);
+}
+
+function isTemporaryBlobUrl(value) {
+  return /^blob:/i.test(String(value || "").trim());
 }
 
 function randomHashValue() {

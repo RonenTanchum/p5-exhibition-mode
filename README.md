@@ -74,6 +74,9 @@ const exhibition = createExhibitionMode({
     intervalValue: 2,
     intervalUnit: "minutes",
     intervalSeconds: 120,
+    hashIntervalValue: 2,
+    hashIntervalUnit: "minutes",
+    hashIntervalSeconds: 120,
     randomHash: true,
     hashParam: "hash",
     items: [
@@ -109,6 +112,9 @@ const exhibition = createExhibitionMode({
     intervalValue: 3,
     intervalUnit: "minutes",
     intervalSeconds: 180,
+    hashIntervalValue: 30,
+    hashIntervalUnit: "seconds",
+    hashIntervalSeconds: 30,
     randomHash: true,
     hashParam: "hash",
     items: [
@@ -119,18 +125,20 @@ const exhibition = createExhibitionMode({
 });
 ```
 
-When `randomHash` is enabled, each playlist load receives a new `?hash=` value. This is useful for generative systems that use URL parameters as seeds.
+When `randomHash` is enabled, each playlist load receives a new `?hash=` value. `hashIntervalValue` and `hashIntervalUnit` can also refresh the current playlist URL with a new hash before the URL itself changes.
 
 You can also edit the playlist directly inside the runtime panel:
 
 1. Press `Shift + G`.
 2. Open the **Playlist** tab.
 3. Use `+` to add a row or `-` to remove one.
-4. Type a local HTML path or full web URL.
-5. Use **Browse** for a temporary local `.html` file preview.
-6. Click **Apply URLs**.
+4. Choose **URL** or **Local path** for each row.
+5. Type a served local HTML path or full web URL.
+6. Click **Apply URLs** to persist the playlist and runtime settings in browser storage.
 7. Enable **Playlist Mode**.
 8. Set **Playlist Interval** using seconds, minutes, or hours.
+9. Set **Hash Interval** separately when Random `?hash=` should reseed the current URL faster or slower than the URL rotation.
+10. Use **Preview** on any row to load that entry into the iframe immediately.
 
 Valid playlist entries:
 
@@ -142,7 +150,9 @@ https://art.phenomenalabs.com/Rococo/index.html
 https://example.com/live-generative-work
 ```
 
-Browser security note: choosing a file with **Browse** creates a temporary object URL for the selected HTML file. For production kiosks, local paths such as `./works/work-a/index.html` are usually better because relative assets remain predictable.
+Browser security note: the panel does not use a file picker for playlist paths because browsers do not expose real filesystem paths to webpages. For production kiosks, type served local paths such as `./works/work-a/index.html` so relative assets remain predictable.
+
+Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, and cursor mode. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
 
 ## Preparing Artworks for `?hash=`
 
@@ -321,6 +331,9 @@ createExhibitionMode({
     intervalValue: 2,
     intervalUnit: "minutes",
     intervalSeconds: 120,
+    hashIntervalValue: 2,
+    hashIntervalUnit: "minutes",
+    hashIntervalSeconds: 120,
     randomHash: false,
     hashParam: "hash",
     startIndex: 0

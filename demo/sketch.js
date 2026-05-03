@@ -8,49 +8,74 @@ const exhibition = createExhibitionMode({
   idleReset: false
 });
 
-let particles = [];
+const note = document.getElementById("demo-note");
 
-window.setup = function setup() {
-  exhibition.setup();
-  exhibition.applyPixelRatio();
-  createCanvas(windowWidth, windowHeight);
-  noiseSeed(1842);
-  randomSeed(1842);
-  particles = Array.from({ length: 420 }, () => ({
-    x: random(width),
-    y: random(height),
-    r: random(0.4, 2.8),
-    a: random(TAU),
-    s: random(0.18, 0.9)
-  }));
-};
+if (!window.p5) {
+  note.textContent = "p5 failed to load. Check the CDN connection or install p5 locally for offline demos.";
+} else {
+  new window.p5((p) => {
+    let particles = [];
 
-window.draw = function draw() {
-  exhibition.tick();
-  background(5, 5, 5, 22);
-  blendMode(ADD);
-  noStroke();
+    p.setup = function setup() {
+      exhibition.setup();
+      exhibition.applyPixelRatio(p);
+      p.createCanvas(p.windowWidth, p.windowHeight);
+      p.noiseSeed(1842);
+      p.randomSeed(1842);
+      particles = Array.from({ length: 720 }, () => ({
+        x: p.random(p.width),
+        y: p.random(p.height),
+        r: p.random(1.2, 5.2),
+        a: p.random(p.TAU),
+        s: p.random(0.35, 1.2)
+      }));
+      note.textContent = "Click once for fullscreen. Shift + G opens the runtime panel.";
+    };
 
-  const t = millis() * 0.00008;
-  for (const p of particles) {
-    const field = noise(p.x * 0.0018, p.y * 0.0018, t) * TAU * 2;
-    p.x += cos(field + p.a) * p.s;
-    p.y += sin(field - p.a) * p.s;
+    p.draw = function draw() {
+      exhibition.tick();
+      p.background(4, 5, 7, 34);
+      drawAtmosphere(p);
+      p.blendMode(p.ADD);
+      p.noStroke();
 
-    if (p.x < -20) p.x = width + 20;
-    if (p.x > width + 20) p.x = -20;
-    if (p.y < -20) p.y = height + 20;
-    if (p.y > height + 20) p.y = -20;
+      const t = p.millis() * 0.00008;
+      for (const particle of particles) {
+        const field = p.noise(particle.x * 0.0016, particle.y * 0.0016, t) * p.TAU * 2;
+        particle.x += p.cos(field + particle.a) * particle.s;
+        particle.y += p.sin(field - particle.a) * particle.s;
 
-    const glow = 120 + 90 * sin(t * 18 + p.a);
-    fill(120, 170, 255, glow);
-    circle(p.x, p.y, p.r);
+        if (particle.x < -30) particle.x = p.width + 30;
+        if (particle.x > p.width + 30) particle.x = -30;
+        if (particle.y < -30) particle.y = p.height + 30;
+        if (particle.y > p.height + 30) particle.y = -30;
+
+        const glow = 120 + 120 * p.sin(t * 20 + particle.a);
+        p.fill(85, 155, 255, glow);
+        p.circle(particle.x, particle.y, particle.r);
+      }
+
+      p.blendMode(p.BLEND);
+    };
+
+    p.windowResized = function windowResized() {
+      exhibition.applyPixelRatio(p);
+      p.resizeCanvas(p.windowWidth, p.windowHeight);
+    };
+  });
+}
+
+function drawAtmosphere(p) {
+  p.push();
+  p.noStroke();
+  for (let i = 0; i < 6; i += 1) {
+    const x = p.width * (0.25 + i * 0.11) + p.sin(p.frameCount * 0.006 + i) * 80;
+    const y = p.height * (0.42 + p.sin(i * 1.7) * 0.16);
+    const size = p.min(p.width, p.height) * (0.34 + i * 0.045);
+    p.fill(30, 72, 150, 14);
+    p.circle(x, y, size);
   }
-
-  blendMode(BLEND);
-};
-
-window.windowResized = function windowResized() {
-  exhibition.applyPixelRatio();
-  resizeCanvas(windowWidth, windowHeight);
-};
+  p.fill(180, 220, 255, 36);
+  p.circle(p.width * 0.5, p.height * 0.48, p.min(p.width, p.height) * 0.22);
+  p.pop();
+}

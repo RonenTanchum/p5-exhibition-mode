@@ -30,6 +30,18 @@ export type ExhibitionModeOptions = {
   onDiagnostics?: (diagnostics: ExhibitionDiagnostics) => void;
 };
 
+export type ExhibitionInputLockOptions = {
+  contextMenu?: boolean;
+  touchGestures?: boolean;
+  scroll?: boolean;
+};
+
+export type ExhibitionCursorOptions = {
+  hide?: boolean;
+  mode?: "always" | "idle";
+  idleMs?: number;
+};
+
 export type ExhibitionAccessibilityOptions = {
   reducedMotion?: boolean;
   highContrast?: boolean;
@@ -118,6 +130,12 @@ export type ExhibitionMode = {
   setOption: (key: keyof ExhibitionModeOptions, value: unknown) => ExhibitionMode;
   setRotation: (degrees: 0 | 90 | 180 | 270 | number | string) => ExhibitionMode;
   setAccessibility: (options: ExhibitionAccessibilityOptions) => ExhibitionMode;
+  setFullscreen: (value: boolean) => ExhibitionMode;
+  setKiosk: (value: boolean) => ExhibitionMode;
+  setInputLocks: (options: ExhibitionInputLockOptions) => ExhibitionMode;
+  setCursor: (options: boolean | ExhibitionCursorOptions) => ExhibitionMode;
+  setWatchdog: (options: ExhibitionWatchdogOptions) => ExhibitionMode;
+  setHealthCheck: (options: ExhibitionHealthCheckOptions) => ExhibitionMode;
   refreshArtwork: (reason?: string) => ExhibitionMode;
   togglePlaylist: (force?: boolean) => ExhibitionMode;
   nextPlaylistItem: () => string | null;
@@ -126,8 +144,12 @@ export type ExhibitionMode = {
   setPlaylistIntervalParts: (value: number | string, unit: "seconds" | "minutes" | "hours") => ExhibitionMode;
   setPlaylistHashIntervalParts: (value: number | string, unit: "seconds" | "minutes" | "hours") => ExhibitionMode;
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
+  setPlaylistOptions: (options: ExhibitionPlaylistOptions) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
   previewPlaylistUrl: (url: string) => string | null;
+  getConfig: () => Partial<ExhibitionModeOptions>;
+  loadConfig: (config: Partial<ExhibitionModeOptions>) => ExhibitionMode;
+  saveConfig: () => Partial<ExhibitionModeOptions>;
   exportConfig: () => Partial<ExhibitionModeOptions>;
 };
 

@@ -251,13 +251,13 @@ export function createExhibitionMode(options = {}) {
       if (config.disableTouchGestures && !state.panel?.contains(event.target)) event.preventDefault();
     }, { passive: false });
 
-    if (config.preventScroll) {
-      const blockScrollKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " "]);
-      add(window, "wheel", (event) => event.preventDefault(), { passive: false });
-      add(window, "keydown", (event) => {
-        if (blockScrollKeys.has(event.key) && !state.panel?.contains(event.target)) event.preventDefault();
-      });
-    }
+    const blockScrollKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " "]);
+    add(window, "wheel", (event) => {
+      if (config.preventScroll && !state.panel?.contains(event.target)) event.preventDefault();
+    }, { passive: false });
+    add(window, "keydown", (event) => {
+      if (config.preventScroll && blockScrollKeys.has(event.key) && !state.panel?.contains(event.target)) event.preventDefault();
+    });
   }
 
   function installKeyboard() {
@@ -336,6 +336,59 @@ export function createExhibitionMode(options = {}) {
   function setAccessibility(next = {}) {
     config.accessibility = { ...accessibilityConfig(), ...next };
     applyAccessibility();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setFullscreen(value) {
+    config.fullscreen = Boolean(value);
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setKiosk(value) {
+    config.kiosk = Boolean(value);
+    applyKioskMode();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setInputLocks(next = {}) {
+    if ("contextMenu" in next) config.disableContextMenu = Boolean(next.contextMenu);
+    if ("touchGestures" in next) config.disableTouchGestures = Boolean(next.touchGestures);
+    if ("scroll" in next) config.preventScroll = Boolean(next.scroll);
+    updateInputLockClasses();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setCursor(next = {}) {
+    if (typeof next === "boolean") config.hideCursor = next;
+    else {
+      if ("hide" in next) config.hideCursor = Boolean(next.hide);
+      if ("mode" in next) config.hideCursorMode = next.mode === "idle" ? "idle" : "always";
+      if ("idleMs" in next) config.cursorIdleMs = Math.max(0, Number(next.idleMs) || 0);
+    }
+    config.hideCursor ? applyCursorMode() : showCursor();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setWatchdog(next = {}) {
+    config.watchdog = { ...watchdogConfig(), ...next };
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setHealthCheck(next = {}) {
+    config.healthCheck = { ...healthCheckConfig(), ...next };
+    state.lastHealthAt = 0;
     persistConfig();
     updatePanel();
     return api;
@@ -530,6 +583,19 @@ export function createExhibitionMode(options = {}) {
     return api;
   }
 
+  function setPlaylistOptions(next = {}) {
+    const playlist = { ...playlistConfig(), ...next };
+    if ("items" in next) playlist.items = normalizePlaylistItems(next.items);
+    config.playlist = playlist;
+    if (state.playlistFrame) state.playlistFrame.hidden = !Boolean(playlist.enabled);
+    state.playlistEnabled = Boolean(playlist.enabled && playlistItems().length);
+    if (state.playlistEnabled) loadPlaylistItem(playlist.startIndex ?? state.playlistIndex);
+    persistConfig();
+    updatePanel();
+    syncPlaylistRows(state.panel, playlist.items, { force: true });
+    return api;
+  }
+
   function setPlaylistItems(items) {
     const normalized = normalizePlaylistItems(items);
     config.playlist = { ...playlistConfig(), items: normalized };
@@ -555,8 +621,36 @@ export function createExhibitionMode(options = {}) {
     writeRuntimeConfig(config.storageKey, serializeRuntimeConfig(config));
   }
 
+  function saveConfig() {
+    persistConfig();
+    return getConfig();
+  }
+
+  function getConfig() {
+    return serializeRuntimeConfig(config);
+  }
+
+  function loadConfig(next = {}) {
+    const merged = mergeRuntimeConfig(config, next);
+    Object.keys(config).forEach((key) => delete config[key]);
+    Object.assign(config, merged);
+    applyRotation();
+    applyAccessibility();
+    applyKioskMode();
+    applyCursorMode();
+    updateInputLockClasses();
+    state.playlistEnabled = Boolean(playlistConfig().enabled && playlistItems().length);
+    if (playlistItems().length && !state.playlistFrame) ensurePlaylistFrame();
+    if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
+    if (state.playlistEnabled) loadPlaylistItem(playlistConfig().startIndex ?? state.playlistIndex);
+    persistConfig();
+    syncPlaylistRows(state.panel, playlistItems(), { force: true });
+    updatePanel();
+    return api;
+  }
+
   function exportConfig() {
-    const snapshot = serializeRuntimeConfig(config);
+    const snapshot = getConfig();
     persistConfig();
     downloadJson(snapshot, `${safeName(config.title || "p5-exhibition-mode")}-runtime-config.json`);
     return snapshot;
@@ -689,6 +783,12 @@ export function createExhibitionMode(options = {}) {
     setOption,
     setRotation,
     setAccessibility,
+    setFullscreen,
+    setKiosk,
+    setInputLocks,
+    setCursor,
+    setWatchdog,
+    setHealthCheck,
     refreshArtwork,
     togglePlaylist,
     nextPlaylistItem,
@@ -697,8 +797,12 @@ export function createExhibitionMode(options = {}) {
     setPlaylistIntervalParts,
     setPlaylistHashIntervalParts,
     setPlaylistRandomHash,
+    setPlaylistOptions,
     setPlaylistItems,
     previewPlaylistUrl,
+    getConfig,
+    loadConfig,
+    saveConfig,
     exportConfig
   };
 
@@ -752,7 +856,6 @@ function createPanel(config, api) {
         </div>
         <div class="p5em-playlist-options">
           ${toggle("playlist", "Playlist mode")}
-          ${toggle("playlist-hash", "Random ?hash=")}
           <label class="p5em-number-control">
             <span>Playlist Interval</span>
             <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
@@ -765,6 +868,7 @@ function createPanel(config, api) {
               <option value="hours">Hours</option>
             </select>
           </label>
+          ${toggle("playlist-hash", "Random ?hash=")}
           <label class="p5em-number-control">
             <span>Hash Interval</span>
             <input data-input="playlist-hash-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).hashIntervalSeconds}">
@@ -779,7 +883,7 @@ function createPanel(config, api) {
           </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Preview loads the selected row immediately.</p>
+        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Preview loads the selected row immediately. Browse is temporary and does not save a filesystem path.</p>
       </section>
     </div>
     <div class="p5em-panel-actions">
@@ -823,6 +927,9 @@ function createPanel(config, api) {
       const input = row?.querySelector("[data-input='playlist-url']");
       if (input?.value) api.previewPlaylistUrl(input.value);
     }
+    if (action === "playlist-browse") {
+      event.target.closest(".p5em-playlist-row")?.querySelector("[data-input='playlist-file']")?.click();
+    }
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
   });
@@ -857,10 +964,15 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "playlist-kind") {
       const row = event.target.closest(".p5em-playlist-row");
-      const input = row?.querySelector("[data-input='playlist-url']");
-      if (input) {
-        input.placeholder = event.target.value === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
-      }
+      if (row) updatePlaylistRowKind(row, event.target.value);
+    }
+    if (event.target?.dataset?.input === "playlist-file") {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      api.previewPlaylistUrl(url);
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      event.target.value = "";
     }
   });
   syncPlaylistRows(panel, playlistConfigFrom(config).items);
@@ -921,6 +1033,7 @@ function addPlaylistRow(panel, value = "") {
   const row = document.createElement("div");
   row.className = "p5em-playlist-row";
   const kind = isLikelyRemoteUrl(value) ? "url" : "local";
+  row.dataset.kind = kind;
   row.innerHTML = `
     <select data-input="playlist-kind" aria-label="Playlist item type">
       <option value="url"${kind === "url" ? " selected" : ""}>URL</option>
@@ -928,6 +1041,8 @@ function addPlaylistRow(panel, value = "") {
     </select>
     <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
     <button type="button" data-action="playlist-preview">Preview</button>
+    <button type="button" data-action="playlist-browse">Browse</button>
+    <input data-input="playlist-file" type="file" accept=".html,text/html" hidden>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
   `;
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
@@ -940,6 +1055,14 @@ function addPlaylistRow(panel, value = "") {
     container.dataset.editing = "false";
   });
   container.appendChild(row);
+}
+
+function updatePlaylistRowKind(row, kind) {
+  row.dataset.kind = kind;
+  const input = row.querySelector("[data-input='playlist-url']");
+  if (input) {
+    input.placeholder = kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
+  }
 }
 
 function collectPlaylistRows(panel) {
@@ -1213,9 +1336,12 @@ function injectStyles() {
     }
     .p5em-playlist-row {
       display: grid;
-      grid-template-columns: 104px minmax(0, 1fr) auto 26px;
+      grid-template-columns: 104px minmax(0, 1fr) auto auto 26px;
       gap: 7px;
       align-items: center;
+    }
+    .p5em-playlist-row[data-kind="url"] [data-action="playlist-browse"] {
+      display: none;
     }
     .p5em-playlist-row input[type="text"],
     .p5em-playlist-row select {

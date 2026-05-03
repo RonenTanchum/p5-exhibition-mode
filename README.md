@@ -22,12 +22,13 @@ This library adds a small production layer around the sketch without changing th
 - Optional idle reset
 - FPS, resolution, fullscreen, uptime, reload, and memory diagnostics
 - Screenshot capture
-- Hidden Phenomena-style runtime panel
+- Hidden runtime panel
 - Runtime toggles for touch locks, context menu locks, cursor hiding, playlist mode, and random hash URLs
 - 0 / 90 CW / 90 CCW / 180 rotation for vertical displays and rotated projectors
 - Rotation-triggered artwork refresh for sketches and playlist iframes
 - Playlist editor inside the runtime panel for local HTML paths and web URLs
 - Optional playlist mode for rotating local sketches and live generative URLs
+- Code-only API for driving every runtime control without the panel
 - Basic watchdog, dropped-frame logging, and optional remote health checks
 - Sensor bridge for manual values, JSON polling, and WebSocket inputs
 - Technical rider template and artwork manifest schema
@@ -101,6 +102,61 @@ function draw() {
 
 Press `Shift + G` to open the diagnostics panel.
 
+## Code-Only Runtime Control
+
+Every panel control is also available through the API, so high-end installation builds can run with `panel: false` and drive the runtime from their own control surface, OSC bridge, venue config loader, or remote admin tool.
+
+```js
+const exhibition = createExhibitionMode({
+  panel: false,
+  fullscreen: true,
+  kiosk: true,
+  rotation: 90,
+  persist: true,
+  storageKey: "gallery-a-main-wall",
+  playlist: {
+    enabled: true,
+    intervalValue: 12,
+    intervalUnit: "minutes",
+    hashIntervalValue: 45,
+    hashIntervalUnit: "seconds",
+    randomHash: true,
+    items: [
+      "./works/classical-revival/index.html",
+      "https://art.phenomenalabs.com/Rococo/index.html"
+    ]
+  }
+});
+
+exhibition
+  .setup()
+  .setInputLocks({ contextMenu: true, touchGestures: true, scroll: true })
+  .setCursor({ hide: true, mode: "idle", idleMs: 3000 })
+  .setWatchdog({ enabled: true, minFps: 12, seconds: 30, reload: true })
+  .setHealthCheck({ enabled: true, url: "/runtime-health", intervalSeconds: 60 });
+
+// Later, from your own UI / socket / venue scheduler:
+exhibition.setRotation(270);
+exhibition.setPlaylistIntervalParts(20, "minutes");
+exhibition.setPlaylistHashIntervalParts(30, "seconds");
+exhibition.setPlaylistOptions({ randomHash: true });
+exhibition.saveConfig();
+```
+
+Useful methods:
+
+- `setFullscreen(value)`, `enterFullscreen()`, `exitFullscreen()`
+- `setKiosk(value)`
+- `setInputLocks({ contextMenu, touchGestures, scroll })`
+- `setCursor({ hide, mode, idleMs })`
+- `setRotation(degrees)`
+- `setAccessibility({ reducedMotion, highContrast })`
+- `setWatchdog(options)` and `setHealthCheck(options)`
+- `setPlaylistOptions(options)`, `setPlaylistItems(items)`, `togglePlaylist(value)`
+- `setPlaylistIntervalParts(value, unit)` and `setPlaylistHashIntervalParts(value, unit)`
+- `nextPlaylistItem()`, `previousPlaylistItem()`, `previewPlaylistUrl(url)`
+- `getConfig()`, `loadConfig(config)`, `saveConfig()`, `exportConfig()`
+
 ## Playlist Mode
 
 Playlist mode can rotate local sketch pages or live artwork URLs inside a managed fullscreen iframe.
@@ -150,7 +206,7 @@ https://art.phenomenalabs.com/Rococo/index.html
 https://example.com/live-generative-work
 ```
 
-Browser security note: the panel does not use a file picker for playlist paths because browsers do not expose real filesystem paths to webpages. For production kiosks, type served local paths such as `./works/work-a/index.html` so relative assets remain predictable.
+Browser security note: **Browse** uses a file picker only for temporary preview. Browsers do not expose real filesystem paths to webpages, so Browse cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` so relative assets remain predictable.
 
 Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, and cursor mode. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
 
@@ -282,7 +338,7 @@ new p5((sketch) => {
 The panel is intentionally quiet and exhibition-facing. It shows:
 
 - **Runtime tab:** artwork metadata, display status, input locks, accessibility controls, rotation, watchdog, and system diagnostics.
-- **Playlist tab:** add/remove URL rows, browse temporary HTML files, set interval, enable random `?hash=`, and move between playlist items.
+- **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
 - **Actions:** fullscreen, reset, screenshot, diagnostics, apply playlist URLs, previous URL, and next URL.
 
 The panel is designed to fit within the screen height. Controls are compact, and playlist editing uses row controls instead of a long scrolling textarea.

@@ -213,7 +213,7 @@ Useful methods:
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
 - `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, overlayLayout, cardQrPlacement, overlaySafeArea })`
-- `setQrOptions({ qrLink, showQr, qrPosition, qrSize, overlaySafeArea })`
+- `setQrOptions({ qrLink, showQr, qrPosition, qrSize, cardQrPlacement, overlaySafeArea })`
 - `setOverlayLayout("separate" | "card")`
 - `setOverlaySafeArea(pixels)`
 - `startHashRecording()`, `stopHashRecording()`, `clearHashRecording()`, `exportHashRecording()`
@@ -415,7 +415,7 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 
 The panel is designed to fit within the screen height. Runtime, Overlay, and Playlist controls are separated into tabs so title, QR, hash recording, and playlist setup do not crowd the kiosk diagnostics.
 
-The Overlay tab can display title and QR independently or as a single exhibition-label card. Card mode can place the QR below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
+The Overlay tab can display title and QR independently as floating overlays or together as a single exhibition-label card. In Card mode, Title Position places the card on screen, while QR in Card places the QR above, below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
 
 **Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR settings, playlist URLs, intervals, kiosk locks, accessibility, watchdog, logging, and health check settings. **Load JSON** imports that file back into the runtime and refreshes the panel.
 

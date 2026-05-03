@@ -101,6 +101,8 @@ export function createExhibitionMode(options = {}) {
     lastHealthAt: 0,
     raf: null,
     cursorHidden: false,
+    consolePatched: false,
+    originalConsole: {},
     currentHash: readUrlHash(new URL(window.location.href), DEFAULTS.playlist.hashParam),
     currentSource: window.location.href,
     hashRecording: false,
@@ -176,6 +178,7 @@ export function createExhibitionMode(options = {}) {
     document.getElementById("p5em-card-overlay")?.remove();
     document.getElementById("p5em-overlay-layer")?.remove();
     document.documentElement.style.removeProperty("--p5em-overlay-safe-area");
+    restoreConsoleLogging();
   }
 
   function reset() {
@@ -633,6 +636,8 @@ export function createExhibitionMode(options = {}) {
       image.style.width = `${cardQrSize}px`;
       image.style.height = `${cardQrSize}px`;
       image.src = buildQrUrl(config.qrLink, cardQrSize, config.qrProvider);
+    } else {
+      image.removeAttribute("src");
     }
   }
 
@@ -982,12 +987,41 @@ export function createExhibitionMode(options = {}) {
   }
 
   function installRuntimeLogging() {
-    add(window, "error", (event) => log("error", event.message || "Runtime error"));
+    patchConsoleLogging();
+    add(window, "error", (event) => {
+      const target = event.target;
+      const source = target && target !== window
+        ? target.currentSrc || target.src || target.href || target.tagName
+        : event.filename;
+      log("error", event.message || "Runtime error", { source, line: event.lineno, column: event.colno });
+    }, { capture: true });
     add(window, "unhandledrejection", (event) => log("error", event.reason?.message || "Unhandled promise rejection"));
     add(document, "webglcontextlost", (event) => {
       log("error", "WebGL context lost");
       event.preventDefault();
     }, { capture: true });
+  }
+
+  function patchConsoleLogging() {
+    if (state.consolePatched) return;
+    ["log", "info", "warn", "error", "debug"].forEach((method) => {
+      state.originalConsole[method] = console[method];
+      console[method] = (...args) => {
+        state.originalConsole[method]?.apply(console, args);
+        const level = method === "error" ? "error" : method === "warn" ? "warn" : "info";
+        log(level, `console.${method}: ${args.map(formatLogArg).join(" ")}`, { args });
+      };
+    });
+    state.consolePatched = true;
+  }
+
+  function restoreConsoleLogging() {
+    if (!state.consolePatched) return;
+    Object.entries(state.originalConsole).forEach(([method, fn]) => {
+      console[method] = fn;
+    });
+    state.consolePatched = false;
+    state.originalConsole = {};
   }
 
   function log(level, message, detail = null) {
@@ -1233,7 +1267,7 @@ function createPanel(config, api) {
             </select>
           </label>
           <label class="p5em-number-control">
-            <span>Card QR</span>
+            <span>QR in Card</span>
             <select data-input="card-qr-placement">
               ${cardQrPlacementOptions(config.cardQrPlacement)}
             </select>
@@ -1886,6 +1920,9 @@ function injectStyles() {
       padding: 5px;
       background: rgba(255,255,255,0.92);
     }
+    #p5em-card-overlay img[hidden] {
+      display: none;
+    }
     #p5em-card-overlay[data-qr-placement="below"] {
       grid-template-columns: minmax(0, 1fr);
       justify-items: start;
@@ -1893,6 +1930,18 @@ function injectStyles() {
     }
     #p5em-card-overlay[data-qr-placement="below"] img {
       margin-top: 2px;
+    }
+    #p5em-card-overlay[data-qr-placement="above"] {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: start;
+      max-width: min(360px, calc(100% - 36px));
+    }
+    #p5em-card-overlay[data-qr-placement="above"] .p5em-card-copy {
+      order: 2;
+    }
+    #p5em-card-overlay[data-qr-placement="above"] img {
+      order: 1;
+      margin-bottom: 2px;
     }
     #p5em-card-overlay[data-qr-placement="left"] {
       grid-template-columns: auto minmax(0, 1fr);
@@ -2697,14 +2746,15 @@ function positionOptions(selected = "top-left") {
 
 function overlayLayoutOptions(selected = "separate") {
   return [
-    ["separate", "Separate"],
-    ["card", "Title + QR Card"]
+    ["separate", "Floating"],
+    ["card", "Card"]
   ].map(([value, label]) => `<option value="${value}"${normalizeOverlayLayout(selected) === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
 function cardQrPlacementOptions(selected = "below") {
   return [
     ["below", "Below Title"],
+    ["above", "Above Title"],
     ["right", "Right Side"],
     ["left", "Left Side"]
   ].map(([value, label]) => `<option value="${value}"${normalizeCardQrPlacement(selected) === value ? " selected" : ""}>${label}</option>`).join("");
@@ -2738,7 +2788,7 @@ function normalizeOverlayLayout(value) {
 }
 
 function normalizeCardQrPlacement(value) {
-  if (value === "left" || value === "right") return value;
+  if (value === "left" || value === "right" || value === "above") return value;
   return "below";
 }
 
@@ -2792,6 +2842,16 @@ function formatLogTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--:--:--";
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatLogArg(value) {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.stack || value.message;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function safeName(name) {

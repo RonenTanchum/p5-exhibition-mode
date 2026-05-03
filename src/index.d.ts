@@ -74,7 +74,7 @@ export type ExhibitionArtworkMetadataOptions = {
 };
 
 export type ExhibitionOverlayLayout = "separate" | "card";
-export type ExhibitionCardQrPlacement = "below" | "right" | "left";
+export type ExhibitionCardQrPlacement = "below" | "above" | "right" | "left";
 
 export type ExhibitionTitleOverlayFont =
   | "mono"

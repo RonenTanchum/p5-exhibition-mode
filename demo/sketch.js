@@ -8,12 +8,14 @@ const exhibition = createExhibitionMode({
   idleReset: false,
   playlist: {
     enabled: false,
+    intervalValue: 20,
+    intervalUnit: "seconds",
     intervalSeconds: 20,
     randomHash: true,
     hashParam: "hash",
     items: [
-      "./index.html",
-      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+      "https://art.phenomenalabs.com/ClassicalRevival/index.html",
+      "https://art.phenomenalabs.com/Rococo/index.html"
     ]
   }
 });

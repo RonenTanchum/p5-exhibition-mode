@@ -133,6 +133,7 @@ export function createExhibitionMode(options = {}) {
     });
     state.listeners = [];
     document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor", "p5em-lock-touch", "p5em-kiosk");
+    document.documentElement.classList.remove("p5em-playlist-active");
     document.documentElement.style.removeProperty("--p5em-rotation");
     state.panel?.remove();
     state.playlistFrame?.remove();
@@ -412,6 +413,7 @@ export function createExhibitionMode(options = {}) {
     const url = buildPlaylistUrl(items[state.playlistIndex], playlistConfig());
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
+    document.documentElement.classList.add("p5em-playlist-active");
     updatePanel();
     return url;
   }
@@ -427,6 +429,7 @@ export function createExhibitionMode(options = {}) {
   function togglePlaylist(force) {
     state.playlistEnabled = typeof force === "boolean" ? force : !state.playlistEnabled;
     if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
+    document.documentElement.classList.toggle("p5em-playlist-active", Boolean(state.playlistEnabled));
     if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
     updatePanel();
     return api;
@@ -469,6 +472,7 @@ export function createExhibitionMode(options = {}) {
     if (!normalized.length) {
       state.playlistEnabled = false;
       if (state.playlistFrame) state.playlistFrame.hidden = true;
+      document.documentElement.classList.remove("p5em-playlist-active");
     } else if (state.playlistEnabled) {
       loadPlaylistItem(0);
     }
@@ -894,6 +898,11 @@ function injectStyles() {
     }
     .p5em-playlist-frame[hidden] {
       display: none;
+    }
+    .p5em-playlist-active body > canvas {
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
     }
     .p5em-kiosk .p5em-playlist-frame {
       pointer-events: none;

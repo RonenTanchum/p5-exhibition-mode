@@ -28,8 +28,8 @@
     "randomHash": true,
     "hashParam": "hash",
     "items": [
-      "./demo/index.html",
-      "https://art.phenomenalabs.com/classical-revival/?ui=false"
+      "https://art.phenomenalabs.com/ClassicalRevival/index.html",
+      "https://art.phenomenalabs.com/Rococo/index.html"
     ]
   }
 }

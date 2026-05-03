@@ -3055,7 +3055,7 @@ function isTemporaryBlobUrl(value) {
 }
 
 function randomHashValue() {
-  const bytes = new Uint32Array(4);
+  const bytes = new Uint32Array(8);
   crypto.getRandomValues(bytes);
   return `0x${Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("")}`;
 }

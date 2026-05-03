@@ -72,6 +72,13 @@ if (!window.p5) {
       exhibition.applyPixelRatio(p);
       p.resizeCanvas(p.windowWidth, p.windowHeight);
     };
+
+    window.addEventListener("p5em:refresh", () => {
+      exhibition.applyPixelRatio(p);
+      p.resizeCanvas(p.windowWidth, p.windowHeight);
+      p.clear();
+      p.background(4, 5, 7);
+    });
   });
 }
 

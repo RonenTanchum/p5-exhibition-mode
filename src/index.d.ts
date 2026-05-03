@@ -14,6 +14,7 @@ export type ExhibitionModeOptions = {
   panel?: boolean;
   panelKey?: string;
   rotation?: 0 | 90 | 180 | 270;
+  refreshOnRotation?: boolean;
   accessibility?: ExhibitionAccessibilityOptions;
   watchdog?: ExhibitionWatchdogOptions;
   logging?: ExhibitionLoggingOptions;
@@ -105,11 +106,13 @@ export type ExhibitionMode = {
   setOption: (key: keyof ExhibitionModeOptions, value: unknown) => ExhibitionMode;
   setRotation: (degrees: 0 | 90 | 180 | 270 | number | string) => ExhibitionMode;
   setAccessibility: (options: ExhibitionAccessibilityOptions) => ExhibitionMode;
+  refreshArtwork: (reason?: string) => ExhibitionMode;
   togglePlaylist: (force?: boolean) => ExhibitionMode;
   nextPlaylistItem: () => string | null;
   previousPlaylistItem: () => string | null;
   setPlaylistInterval: (seconds: number | string) => ExhibitionMode;
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
+  setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
 };
 
 export function createExhibitionMode(options?: ExhibitionModeOptions): ExhibitionMode;

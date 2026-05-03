@@ -14,6 +14,7 @@ const DEFAULTS = {
   panel: true,
   panelKey: "g",
   rotation: 0,
+  refreshOnRotation: true,
   accessibility: {
     reducedMotion: false,
     highContrast: false
@@ -281,14 +282,19 @@ export function createExhibitionMode(options = {}) {
     config[key] = value;
     if (key === "disableTouchGestures") updateInputLockClasses();
     if (key === "hideCursor" && !value) showCursor();
-    if (key === "rotation") applyRotation();
+    if (key === "rotation") {
+      applyRotation();
+      if (config.refreshOnRotation) refreshArtwork("rotation");
+    }
     updatePanel();
     return api;
   }
 
   function setRotation(degrees) {
+    const previous = normalizeRotation(config.rotation);
     config.rotation = normalizeRotation(degrees);
     applyRotation();
+    if (config.refreshOnRotation && previous !== config.rotation) refreshArtwork("rotation");
     updatePanel();
     return api;
   }
@@ -302,6 +308,18 @@ export function createExhibitionMode(options = {}) {
 
   function applyRotation() {
     document.documentElement.style.setProperty("--p5em-rotation", `${normalizeRotation(config.rotation)}deg`);
+  }
+
+  function refreshArtwork(reason = "manual") {
+    log("info", `Refreshing artwork after ${reason}`);
+    if (state.playlistEnabled && state.playlistFrame?.src) {
+      state.playlistFrame.src = state.playlistFrame.src;
+      return api;
+    }
+    window.dispatchEvent(new CustomEvent("p5em:refresh", { detail: { reason, rotation: normalizeRotation(config.rotation) } }));
+    if (typeof window.windowResized === "function") window.windowResized();
+    if (typeof window.resizeCanvas === "function") window.resizeCanvas(window.innerWidth, window.innerHeight);
+    return api;
   }
 
   function applyAccessibility() {
@@ -400,6 +418,23 @@ export function createExhibitionMode(options = {}) {
     return api;
   }
 
+  function setPlaylistItems(items) {
+    const normalized = normalizePlaylistItems(items);
+    config.playlist = { ...playlistConfig(), items: normalized };
+    state.playlistIndex = 0;
+
+    if (normalized.length && !state.playlistFrame) setupPlaylist();
+    if (!normalized.length) {
+      state.playlistEnabled = false;
+      if (state.playlistFrame) state.playlistFrame.hidden = true;
+    } else if (state.playlistEnabled) {
+      loadPlaylistItem(0);
+    }
+
+    updatePanel();
+    return api;
+  }
+
   function tickWatchdog(now) {
     const watchdog = watchdogConfig();
     if (!watchdog.enabled || state.fps <= 0) return;
@@ -489,6 +524,10 @@ export function createExhibitionMode(options = {}) {
     if (interval && document.activeElement !== interval) interval.value = d.playlistIntervalSeconds;
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
+    const playlistEditor = state.panel.querySelector("[data-input='playlist-items']");
+    if (playlistEditor && document.activeElement !== playlistEditor) {
+      playlistEditor.value = playlistItems().map((item) => typeof item === "string" ? item : item.url).join("\n");
+    }
   }
 
   function setText(key, value) {
@@ -520,11 +559,13 @@ export function createExhibitionMode(options = {}) {
     setOption,
     setRotation,
     setAccessibility,
+    refreshArtwork,
     togglePlaylist,
     nextPlaylistItem,
     previousPlaylistItem,
     setPlaylistInterval,
-    setPlaylistRandomHash
+    setPlaylistRandomHash,
+    setPlaylistItems
   };
 
   return api;
@@ -569,11 +610,18 @@ function createPanel(config, api) {
         </select>
       </label>
     </div>
+    <section class="p5em-playlist-editor">
+      <h2>Playlist URLs</h2>
+      <textarea data-input="playlist-items" spellcheck="false" placeholder="./local-sketch/index.html&#10;https://example.com/live-artwork"></textarea>
+      <p>One local HTML path or web URL per line.</p>
+    </section>
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
       <button type="button" data-action="screenshot">Screenshot</button>
       <button type="button" data-action="diagnostics">Diagnostics</button>
+      <button type="button" data-action="playlist-apply">Apply URLs</button>
+      <button type="button" data-action="playlist-clear">Clear URLs</button>
       <button type="button" data-action="playlist-prev">Prev URL</button>
       <button type="button" data-action="playlist-next">Next URL</button>
     </div>
@@ -587,6 +635,11 @@ function createPanel(config, api) {
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
+    if (action === "playlist-apply") {
+      const value = panel.querySelector("[data-input='playlist-items']")?.value || "";
+      api.setPlaylistItems(parsePlaylistText(value));
+    }
+    if (action === "playlist-clear") api.setPlaylistItems([]);
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
   });
@@ -689,19 +742,22 @@ function injectStyles() {
     }
     #${PANEL_ID} {
       position: fixed;
-      right: 18px;
-      bottom: 18px;
+      right: 12px;
+      top: 12px;
+      bottom: 12px;
       z-index: 2147483647;
-      width: min(420px, calc(100vw - 36px));
-      max-height: calc(100vh - 36px);
-      overflow: auto;
-      padding: 18px;
+      box-sizing: border-box;
+      width: min(760px, calc(100vw - 24px));
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
       color: rgba(255,255,255,0.9);
       background: rgba(7,7,7,0.86);
       border: 1px solid rgba(255,255,255,0.16);
       backdrop-filter: blur(18px);
       box-shadow: 0 24px 80px rgba(0,0,0,0.42);
-      font: 400 12px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 400 11px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0.01em;
     }
     #${PANEL_ID}[hidden] {
@@ -712,7 +768,8 @@ function injectStyles() {
       align-items: center;
       justify-content: space-between;
       gap: 18px;
-      padding-bottom: 14px;
+      padding-bottom: 10px;
+      flex: 0 0 auto;
       border-bottom: 1px solid rgba(255,255,255,0.14);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 10px;
@@ -736,16 +793,17 @@ function injectStyles() {
     }
     .p5em-panel-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-top: 18px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px 14px;
+      margin-top: 12px;
+      flex: 0 0 auto;
     }
     .p5em-panel-grid section {
       border-top: 1px solid rgba(255,255,255,0.14);
-      padding-top: 12px;
+      padding-top: 8px;
     }
     .p5em-panel-grid h2 {
-      margin: 0 0 10px;
+      margin: 0 0 6px;
       color: rgba(255,255,255,0.58);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -756,7 +814,7 @@ function injectStyles() {
       display: flex;
       justify-content: space-between;
       gap: 14px;
-      padding: 4px 0;
+      padding: 2px 0;
     }
     .p5em-panel-grid span {
       color: rgba(255,255,255,0.48);
@@ -770,16 +828,57 @@ function injectStyles() {
     .p5em-panel-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 18px;
+      gap: 7px;
+      margin-top: 10px;
+      flex: 0 0 auto;
     }
     .p5em-panel-controls {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 14px;
-      margin-top: 18px;
-      padding-top: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px 12px;
+      margin-top: 10px;
+      padding-top: 10px;
+      flex: 0 0 auto;
       border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-playlist-editor {
+      margin-top: 10px;
+      padding-top: 10px;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-playlist-editor h2 {
+      margin: 0 0 6px;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p5em-playlist-editor textarea {
+      box-sizing: border-box;
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 54px;
+      max-height: 110px;
+      resize: vertical;
+      padding: 8px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 0;
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .p5em-playlist-editor p {
+      margin: 6px 0 0;
+      color: rgba(255,255,255,0.42);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
     .p5em-toggle,
     .p5em-number-control {
@@ -810,14 +909,15 @@ function injectStyles() {
       text-align: right;
     }
     .p5em-panel-actions button {
-      padding: 9px 11px;
+      padding: 7px 9px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
       letter-spacing: 0.13em;
       text-transform: uppercase;
     }
     .p5em-panel-hint {
-      margin: 14px 0 0;
+      margin: 8px 0 0;
+      flex: 0 0 auto;
       color: rgba(255,255,255,0.42);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -828,14 +928,24 @@ function injectStyles() {
       #${PANEL_ID} {
         left: 12px;
         right: 12px;
+        top: 12px;
         bottom: 12px;
         width: auto;
       }
       .p5em-panel-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .p5em-panel-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 420px) {
+      .p5em-panel-grid,
+      .p5em-panel-controls {
         grid-template-columns: 1fr;
+      }
+      .p5em-playlist-editor textarea {
+        max-height: 72px;
       }
     }
   `;
@@ -890,6 +1000,25 @@ function buildPlaylistUrl(input, playlist) {
   const separator = base.includes("?") ? "&" : "?";
   const nextBase = `${base}${separator}${encodeURIComponent(hashParam)}=${encodeURIComponent(value)}`;
   return fragment === undefined ? nextBase : `${nextBase}#${fragment}`;
+}
+
+function parsePlaylistText(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+function normalizePlaylistItems(items) {
+  if (typeof items === "string") return parsePlaylistText(items);
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object" && item.url) return item;
+      return null;
+    })
+    .filter(Boolean);
 }
 
 function randomHashValue() {

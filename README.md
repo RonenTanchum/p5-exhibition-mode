@@ -78,6 +78,14 @@ const exhibition = createExhibitionMode({
   artist: "Phenomena Labs",
   year: "2026",
   showTitleOverlay: false,
+  titleOverlayFont: "mono",
+  titleOverlayColor: "white",
+  titleOverlayPosition: "top-left",
+  titleOverlaySize: 11,
+  qrLink: "",
+  showQr: false,
+  qrPosition: "bottom-right",
+  qrSize: 96,
   seed: 1842,
   fullscreen: true,
   kiosk: true,
@@ -169,8 +177,19 @@ exhibition.setArtworkMetadata({
   title: "Classical Revival",
   artist: "Ronen Tanchum",
   year: "2026",
-  showTitleOverlay: true
+  showTitleOverlay: true,
+  titleOverlayFont: "serif",
+  titleOverlayColor: "white",
+  titleOverlayPosition: "top-left",
+  titleOverlaySize: 16
 });
+exhibition.setQrOptions({
+  qrLink: "https://example.com/project",
+  showQr: true,
+  qrPosition: "bottom-right",
+  qrSize: 112
+});
+exhibition.startHashRecording();
 exhibition.setPlaylistIntervalParts(20, "minutes");
 exhibition.setPlaylistHashIntervalParts(30, "seconds");
 exhibition.setPlaylistOptions({ randomHash: true });
@@ -185,13 +204,17 @@ Useful methods:
 - `setCursor({ hide, mode, idleMs })`
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
-- `setArtworkMetadata({ title, artist, year, showTitleOverlay })`
+- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize })`
+- `setQrOptions({ qrLink, showQr, qrPosition, qrSize })`
+- `startHashRecording()`, `stopHashRecording()`, `clearHashRecording()`, `exportHashRecording()`
 - `setWatchdog(options)` and `setHealthCheck(options)`
 - `setPlaylistOptions(options)`, `setPlaylistItems(items)`, `togglePlaylist(value)`
 - `setPlaylistIntervalParts(value, unit)` and `setPlaylistHashIntervalParts(value, unit)`
 - `nextPlaylistItem()`, `previousPlaylistItem()`, `previewPlaylistUrl(url)`
 - `getConfig()`, `loadConfig(config)`, `saveConfig()`, `exportConfig()`
 - `localFiles.endpoint` can point at a helper endpoint such as `/__p5em/files`
+
+QR codes are generated as image URLs through `qrProvider` by default. Override `qrProvider` if you want to route QR generation through your own local/offline service.
 
 ## Playlist Mode
 
@@ -374,7 +397,7 @@ new p5((sketch) => {
 
 The panel is intentionally quiet and exhibition-facing. It shows:
 
-- **Runtime tab:** artwork metadata, display status, input locks, accessibility controls, rotation, watchdog, and system diagnostics.
+- **Runtime tab:** title overlay controls, QR code controls, hash recording, display status, input locks, accessibility controls, rotation, watchdog, and system diagnostics.
 - **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
 - **Actions:** fullscreen, reset, screenshot, diagnostics, apply playlist URLs, previous URL, and next URL.
 
@@ -388,6 +411,14 @@ createExhibitionMode({
   artist: "",
   year: "",
   showTitleOverlay: false,
+  titleOverlayFont: "mono",
+  titleOverlayColor: "white",
+  titleOverlayPosition: "top-left",
+  titleOverlaySize: 11,
+  qrLink: "",
+  showQr: false,
+  qrPosition: "bottom-right",
+  qrSize: 96,
   seed: null,
   fullscreen: true,
   kiosk: true,

@@ -3,6 +3,15 @@ export type ExhibitionModeOptions = {
   artist?: string;
   year?: string | number;
   showTitleOverlay?: boolean;
+  titleOverlayFont?: "mono" | "sans" | "serif";
+  titleOverlayColor?: "white" | "black";
+  titleOverlayPosition?: ExhibitionOverlayPosition;
+  titleOverlaySize?: number;
+  qrLink?: string;
+  showQr?: boolean;
+  qrPosition?: ExhibitionOverlayPosition;
+  qrSize?: number;
+  qrProvider?: string;
   seed?: string | number | null;
   fullscreen?: boolean;
   kiosk?: boolean;
@@ -50,6 +59,26 @@ export type ExhibitionArtworkMetadataOptions = {
   artist?: string;
   year?: string | number;
   showTitleOverlay?: boolean;
+  titleOverlayFont?: "mono" | "sans" | "serif";
+  titleOverlayColor?: "white" | "black";
+  titleOverlayPosition?: ExhibitionOverlayPosition;
+  titleOverlaySize?: number;
+};
+
+export type ExhibitionOverlayPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+export type ExhibitionQrOptions = {
+  qrLink?: string;
+  showQr?: boolean;
+  qrPosition?: ExhibitionOverlayPosition;
+  qrSize?: number;
+  qrProvider?: string;
 };
 
 export type ExhibitionAccessibilityOptions = {
@@ -105,6 +134,18 @@ export type ExhibitionDiagnostics = {
   artist: string;
   year: string | number;
   titleOverlayVisible: boolean;
+  titleOverlayFont: "mono" | "sans" | "serif";
+  titleOverlayColor: "white" | "black";
+  titleOverlayPosition: ExhibitionOverlayPosition;
+  titleOverlaySize: number;
+  qrLink: string;
+  qrVisible: boolean;
+  qrPosition: ExhibitionOverlayPosition;
+  qrSize: number;
+  currentHash: string;
+  currentSource: string;
+  hashRecording: boolean;
+  hashRecordCount: number;
   seed: string | number | null;
   uptimeSeconds: number;
   fps: number;
@@ -154,6 +195,11 @@ export type ExhibitionMode = {
   setWatchdog: (options: ExhibitionWatchdogOptions) => ExhibitionMode;
   setHealthCheck: (options: ExhibitionHealthCheckOptions) => ExhibitionMode;
   setArtworkMetadata: (options: ExhibitionArtworkMetadataOptions) => ExhibitionMode;
+  setQrOptions: (options: ExhibitionQrOptions) => ExhibitionMode;
+  startHashRecording: () => ExhibitionMode;
+  stopHashRecording: () => ExhibitionMode;
+  clearHashRecording: () => ExhibitionMode;
+  exportHashRecording: () => { title: string; artist: string; year: string | number; exportedAt: string; records: unknown[] };
   refreshArtwork: (reason?: string) => ExhibitionMode;
   togglePlaylist: (force?: boolean) => ExhibitionMode;
   nextPlaylistItem: () => string | null;

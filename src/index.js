@@ -3,6 +3,15 @@ const DEFAULTS = {
   artist: "",
   year: "",
   showTitleOverlay: false,
+  titleOverlayFont: "mono",
+  titleOverlayColor: "white",
+  titleOverlayPosition: "top-left",
+  titleOverlaySize: 11,
+  qrLink: "",
+  showQr: false,
+  qrPosition: "bottom-right",
+  qrSize: 96,
+  qrProvider: "https://api.qrserver.com/v1/create-qr-code/",
   seed: null,
   fullscreen: true,
   kiosk: true,
@@ -87,7 +96,11 @@ export function createExhibitionMode(options = {}) {
     logs: [],
     lastHealthAt: 0,
     raf: null,
-    cursorHidden: false
+    cursorHidden: false,
+    currentHash: readUrlHash(new URL(window.location.href), DEFAULTS.playlist.hashParam),
+    currentSource: window.location.href,
+    hashRecording: false,
+    hashRecords: []
   };
 
   function setup() {
@@ -102,6 +115,7 @@ export function createExhibitionMode(options = {}) {
     applyKioskMode();
     applyCursorMode();
     applyTitleOverlay();
+    applyQrOverlay();
     setupPlaylist();
 
     if (config.panel) {
@@ -152,6 +166,7 @@ export function createExhibitionMode(options = {}) {
     state.panel?.remove();
     state.playlistFrame?.remove();
     document.getElementById("p5em-title-overlay")?.remove();
+    document.getElementById("p5em-qr-overlay")?.remove();
   }
 
   function reset() {
@@ -203,6 +218,18 @@ export function createExhibitionMode(options = {}) {
       artist: config.artist,
       year: config.year,
       titleOverlayVisible: Boolean(config.showTitleOverlay),
+      titleOverlayFont: config.titleOverlayFont,
+      titleOverlayColor: config.titleOverlayColor,
+      titleOverlayPosition: config.titleOverlayPosition,
+      titleOverlaySize: config.titleOverlaySize,
+      qrLink: config.qrLink,
+      qrVisible: Boolean(config.showQr),
+      qrPosition: config.qrPosition,
+      qrSize: config.qrSize,
+      currentHash: state.currentHash || "",
+      currentSource: state.currentSource || "",
+      hashRecording: Boolean(state.hashRecording),
+      hashRecordCount: state.hashRecords.length,
       seed: config.seed,
       uptimeSeconds: Math.round((performance.now() - state.startedAt) / 1000),
       fps: Math.round(state.fps * 10) / 10,
@@ -409,7 +436,23 @@ export function createExhibitionMode(options = {}) {
     if ("artist" in next) config.artist = String(next.artist || "");
     if ("year" in next) config.year = String(next.year || "");
     if ("showTitleOverlay" in next) config.showTitleOverlay = Boolean(next.showTitleOverlay);
+    if ("titleOverlayFont" in next) config.titleOverlayFont = normalizeTitleFont(next.titleOverlayFont);
+    if ("titleOverlayColor" in next) config.titleOverlayColor = next.titleOverlayColor === "black" ? "black" : "white";
+    if ("titleOverlayPosition" in next) config.titleOverlayPosition = normalizeOverlayPosition(next.titleOverlayPosition);
+    if ("titleOverlaySize" in next) config.titleOverlaySize = clamp(Number(next.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48);
     applyTitleOverlay();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setQrOptions(next = {}) {
+    if ("qrLink" in next) config.qrLink = String(next.qrLink || "");
+    if ("showQr" in next) config.showQr = Boolean(next.showQr);
+    if ("qrPosition" in next) config.qrPosition = normalizeOverlayPosition(next.qrPosition);
+    if ("qrSize" in next) config.qrSize = clamp(Number(next.qrSize) || DEFAULTS.qrSize, 48, 320);
+    if ("qrProvider" in next) config.qrProvider = String(next.qrProvider || DEFAULTS.qrProvider);
+    applyQrOverlay();
     persistConfig();
     updatePanel();
     return api;
@@ -453,6 +496,32 @@ export function createExhibitionMode(options = {}) {
       document.body.appendChild(overlay);
     }
     overlay.textContent = formatTitleOverlay(config);
+    overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
+    overlay.dataset.color = config.titleOverlayColor === "black" ? "black" : "white";
+    overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
+    overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
+  }
+
+  function applyQrOverlay() {
+    let overlay = document.getElementById("p5em-qr-overlay");
+    if (!config.showQr || !config.qrLink) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("a");
+      overlay.id = "p5em-qr-overlay";
+      overlay.target = "_blank";
+      overlay.rel = "noopener noreferrer";
+      overlay.innerHTML = `<img alt="QR code">`;
+      document.body.appendChild(overlay);
+    }
+    const size = clamp(Number(config.qrSize) || DEFAULTS.qrSize, 48, 320);
+    overlay.href = config.qrLink;
+    overlay.dataset.position = normalizeOverlayPosition(config.qrPosition);
+    overlay.style.width = `${size}px`;
+    overlay.style.height = `${size}px`;
+    overlay.querySelector("img").src = buildQrUrl(config.qrLink, size, config.qrProvider);
   }
 
   function setupPlaylist() {
@@ -534,6 +603,7 @@ export function createExhibitionMode(options = {}) {
     if (!options.keepUrlTimer) state.playlistLastChangeAt = now;
     state.playlistLastHashAt = now;
     const url = buildPlaylistUrl(items[state.playlistIndex], playlistConfig());
+    updateCurrentSource(url, playlistConfig().hashParam || "hash");
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
     document.documentElement.classList.add("p5em-playlist-active");
@@ -545,7 +615,9 @@ export function createExhibitionMode(options = {}) {
     const cleanUrl = String(url || "").trim();
     if (!cleanUrl) return null;
     ensurePlaylistFrame();
-    state.playlistFrame.src = buildPlaylistUrl(cleanUrl, playlistConfig());
+    const builtUrl = buildPlaylistUrl(cleanUrl, playlistConfig());
+    updateCurrentSource(builtUrl, playlistConfig().hashParam || "hash");
+    state.playlistFrame.src = builtUrl;
     state.playlistFrame.hidden = false;
     state.playlistLastHashAt = performance.now();
     document.documentElement.classList.add("p5em-playlist-active");
@@ -559,6 +631,12 @@ export function createExhibitionMode(options = {}) {
 
   function previousPlaylistItem() {
     return loadPlaylistItem(state.playlistIndex - 1);
+  }
+
+  function updateCurrentSource(url, hashParam = "hash") {
+    state.currentSource = url || "";
+    state.currentHash = readUrlHash(safeUrl(url), hashParam);
+    recordHashSample("source");
   }
 
   function togglePlaylist(force) {
@@ -674,6 +752,7 @@ export function createExhibitionMode(options = {}) {
     applyKioskMode();
     applyCursorMode();
     applyTitleOverlay();
+    applyQrOverlay();
     updateInputLockClasses();
     state.playlistEnabled = Boolean(playlistConfig().enabled && playlistItems().length);
     if (playlistItems().length && !state.playlistFrame) ensurePlaylistFrame();
@@ -690,6 +769,54 @@ export function createExhibitionMode(options = {}) {
     persistConfig();
     downloadJson(snapshot, `${safeName(config.title || "p5-exhibition-mode")}-runtime-config.json`);
     return snapshot;
+  }
+
+  function startHashRecording() {
+    state.hashRecording = true;
+    recordHashSample("start");
+    updatePanel();
+    return api;
+  }
+
+  function stopHashRecording() {
+    recordHashSample("stop");
+    state.hashRecording = false;
+    updatePanel();
+    return api;
+  }
+
+  function clearHashRecording() {
+    state.hashRecords = [];
+    updatePanel();
+    return api;
+  }
+
+  function exportHashRecording() {
+    const data = {
+      title: config.title,
+      artist: config.artist,
+      year: config.year,
+      exportedAt: new Date().toISOString(),
+      records: state.hashRecords
+    };
+    downloadJson(data, `${safeName(config.title || "hash-recording")}-hashes.json`);
+    return data;
+  }
+
+  function recordHashSample(reason = "change") {
+    if (!state.hashRecording && reason !== "start" && reason !== "manual") return null;
+    const entry = {
+      timestamp: new Date().toISOString(),
+      reason,
+      hash: state.currentHash || "",
+      source: state.currentSource || "",
+      playlistIndex: state.playlistIndex,
+      title: config.title,
+      artist: config.artist,
+      year: config.year
+    };
+    state.hashRecords.push(entry);
+    return entry;
   }
 
   function tickWatchdog(now) {
@@ -769,6 +896,10 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-playlist-interval", formatInterval(d.playlistIntervalSeconds));
     setText("p5em-playlist-hash-interval", formatInterval(d.playlistHashIntervalSeconds));
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
+    setText("p5em-current-hash", d.currentHash || "None");
+    setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 34));
+    setText("p5em-hash-recording", d.hashRecording ? "Active" : "Stopped");
+    setText("p5em-hash-record-count", String(d.hashRecordCount));
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
     setText("p5em-reloads", String(d.reloadCount));
@@ -780,9 +911,18 @@ export function createExhibitionMode(options = {}) {
     setChecked("reduced-motion", d.reducedMotion);
     setChecked("high-contrast", d.highContrast);
     setChecked("title-overlay", d.titleOverlayVisible);
+    setChecked("qr-overlay", d.qrVisible);
     setInputValue("artwork-title", d.title);
     setInputValue("artwork-artist", d.artist);
     setInputValue("artwork-year", d.year);
+    setInputValue("current-hash", d.currentHash);
+    setInputValue("qr-link", d.qrLink);
+    setInputValue("title-size", d.titleOverlaySize);
+    setInputValue("qr-size", d.qrSize);
+    setInputValue("title-font", d.titleOverlayFont);
+    setInputValue("title-color", d.titleOverlayColor);
+    setInputValue("title-position", d.titleOverlayPosition);
+    setInputValue("qr-position", d.qrPosition);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
@@ -836,7 +976,11 @@ export function createExhibitionMode(options = {}) {
     setWatchdog,
     setHealthCheck,
     setArtworkMetadata,
-    setArtworkMetadata,
+    setQrOptions,
+    startHashRecording,
+    stopHashRecording,
+    clearHashRecording,
+    exportHashRecording,
     refreshArtwork,
     togglePlaylist,
     nextPlaylistItem,
@@ -878,9 +1022,12 @@ function createPanel(config, api) {
         ${section("Display", [["Resolution", "p5em-resolution"], ["DPR", "p5em-dpr"], ["FPS", "p5em-fps"], ["Fullscreen", "p5em-fullscreen"], ["Rotation", "p5em-rotation"]])}
         ${section("Input Locks", [["Context Menu", "p5em-context"], ["Touch Gestures", "p5em-touch"], ["Cursor Hide", "p5em-cursor"], ["Motion", "p5em-motion"], ["Contrast", "p5em-contrast"]])}
         ${section("Playlist", [["Status", "p5em-playlist"], ["URL Interval", "p5em-playlist-interval"], ["Hash Interval", "p5em-playlist-hash-interval"], ["Random Hash", "p5em-playlist-hash"]])}
+        ${section("Hash Recorder", [["Hash", "p5em-current-hash"], ["Source", "p5em-current-source"], ["Recording", "p5em-hash-recording"], ["Records", "p5em-hash-record-count"]])}
         ${section("System", [["Uptime", "p5em-uptime"], ["Memory", "p5em-memory"], ["Reloads", "p5em-reloads"], ["Watchdog", "p5em-watchdog"], ["Dropped", "p5em-dropped"], ["Logs", "p5em-logs"]])}
       </div>
       <div class="p5em-panel-controls">
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Title Overlay</h2>
         <label class="p5em-text-control">
           <span>Artwork Title</span>
           <input data-input="artwork-title" type="text" value="${escapeAttr(config.title)}">
@@ -894,6 +1041,65 @@ function createPanel(config, api) {
           <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
         </label>
         ${toggle("title-overlay", "Show title overlay")}
+          <label class="p5em-number-control">
+            <span>Title Size</span>
+            <input data-input="title-size" type="range" min="8" max="48" step="1" value="${config.titleOverlaySize}">
+          </label>
+          <label class="p5em-number-control">
+            <span>Title Font</span>
+            <select data-input="title-font">
+              <option value="mono">Mono</option>
+              <option value="sans">Sans</option>
+              <option value="serif">Serif</option>
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Title Color</span>
+            <select data-input="title-color">
+              <option value="white">White</option>
+              <option value="black">Black</option>
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Title Position</span>
+            <select data-input="title-position">
+              ${positionOptions(config.titleOverlayPosition)}
+            </select>
+          </label>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>QR Code</h2>
+          <label class="p5em-text-control">
+            <span>QR Link</span>
+            <input data-input="qr-link" type="url" value="${escapeAttr(config.qrLink)}" placeholder="https://...">
+          </label>
+          ${toggle("qr-overlay", "Show QR code")}
+          <label class="p5em-number-control">
+            <span>QR Size</span>
+            <input data-input="qr-size" type="range" min="48" max="320" step="4" value="${config.qrSize}">
+          </label>
+          <label class="p5em-number-control">
+            <span>QR Position</span>
+            <select data-input="qr-position">
+              ${positionOptions(config.qrPosition)}
+            </select>
+          </label>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Hash Recording</h2>
+          <label class="p5em-text-control">
+            <span>Hash Number</span>
+            <input data-input="current-hash" type="text" value="" readonly>
+          </label>
+          <div class="p5em-button-row">
+            <button type="button" data-action="hash-record-start">Start</button>
+            <button type="button" data-action="hash-record-stop">Stop</button>
+            <button type="button" data-action="hash-record-export">Export JSON</button>
+            <button type="button" data-action="hash-record-clear">Clear</button>
+          </div>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Runtime</h2>
         ${toggle("context", "Context menu lock")}
         ${toggle("touch", "Touch gestures lock")}
         ${toggle("cursor", "Hide cursor")}
@@ -908,6 +1114,7 @@ function createPanel(config, api) {
             <option value="180">180</option>
           </select>
         </label>
+        </div>
       </div>
     </div>
     <div class="p5em-tab-panel" data-panel="playlist" role="tabpanel" hidden>
@@ -970,6 +1177,10 @@ function createPanel(config, api) {
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
+    if (action === "hash-record-start") api.startHashRecording();
+    if (action === "hash-record-stop") api.stopHashRecording();
+    if (action === "hash-record-export") api.exportHashRecording();
+    if (action === "hash-record-clear") api.clearHashRecording();
     if (action === "playlist-apply") {
       api.setPlaylistItems(collectPlaylistRows(panel));
     }
@@ -998,6 +1209,7 @@ function createPanel(config, api) {
     if (toggle === "touch") api.setOption("disableTouchGestures", event.target.checked);
     if (toggle === "cursor") api.setOption("hideCursor", event.target.checked);
     if (toggle === "title-overlay") api.setArtworkMetadata({ showTitleOverlay: event.target.checked });
+    if (toggle === "qr-overlay") api.setQrOptions({ showQr: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
     if (toggle === "playlist") api.togglePlaylist(event.target.checked);
@@ -1030,6 +1242,27 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "artwork-year") {
       api.setArtworkMetadata({ year: event.target.value });
+    }
+    if (event.target?.dataset?.input === "title-size") {
+      api.setArtworkMetadata({ titleOverlaySize: event.target.value });
+    }
+    if (event.target?.dataset?.input === "title-font") {
+      api.setArtworkMetadata({ titleOverlayFont: event.target.value });
+    }
+    if (event.target?.dataset?.input === "title-color") {
+      api.setArtworkMetadata({ titleOverlayColor: event.target.value });
+    }
+    if (event.target?.dataset?.input === "title-position") {
+      api.setArtworkMetadata({ titleOverlayPosition: event.target.value });
+    }
+    if (event.target?.dataset?.input === "qr-link") {
+      api.setQrOptions({ qrLink: event.target.value });
+    }
+    if (event.target?.dataset?.input === "qr-size") {
+      api.setQrOptions({ qrSize: event.target.value });
+    }
+    if (event.target?.dataset?.input === "qr-position") {
+      api.setQrOptions({ qrPosition: event.target.value });
     }
     if (event.target?.dataset?.input === "playlist-kind") {
       const row = event.target.closest(".p5em-playlist-row");
@@ -1363,16 +1596,74 @@ function injectStyles() {
     }
     #p5em-title-overlay {
       position: fixed;
-      left: 18px;
-      top: 16px;
       z-index: 2147483646;
       max-width: min(520px, calc(100vw - 36px));
-      color: rgba(255,255,255,0.86);
       font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       text-shadow: 0 1px 14px rgba(0,0,0,0.7);
       pointer-events: none;
+    }
+    #p5em-title-overlay[data-font="sans"] {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #p5em-title-overlay[data-font="serif"] {
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: 0.02em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-color="white"] {
+      color: rgba(255,255,255,0.88);
+      text-shadow: 0 1px 14px rgba(0,0,0,0.72);
+    }
+    #p5em-title-overlay[data-color="black"] {
+      color: rgba(0,0,0,0.88);
+      text-shadow: 0 1px 14px rgba(255,255,255,0.5);
+    }
+    #p5em-title-overlay[data-position^="top"],
+    #p5em-qr-overlay[data-position^="top"] {
+      top: 16px;
+      bottom: auto;
+    }
+    #p5em-title-overlay[data-position^="bottom"],
+    #p5em-qr-overlay[data-position^="bottom"] {
+      top: auto;
+      bottom: 16px;
+    }
+    #p5em-title-overlay[data-position$="left"],
+    #p5em-qr-overlay[data-position$="left"] {
+      left: 18px;
+      right: auto;
+      transform: none;
+      text-align: left;
+    }
+    #p5em-title-overlay[data-position$="center"],
+    #p5em-qr-overlay[data-position$="center"] {
+      left: 50%;
+      right: auto;
+      transform: translateX(-50%);
+      text-align: center;
+    }
+    #p5em-title-overlay[data-position$="right"],
+    #p5em-qr-overlay[data-position$="right"] {
+      left: auto;
+      right: 18px;
+      transform: none;
+      text-align: right;
+    }
+    #p5em-qr-overlay {
+      position: fixed;
+      z-index: 2147483646;
+      display: block;
+      padding: 6px;
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.28);
+      pointer-events: auto;
+    }
+    #p5em-qr-overlay img {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
     body > canvas {
       position: relative;
@@ -1511,6 +1802,42 @@ function injectStyles() {
       padding-top: 10px;
       flex: 0 0 auto;
       border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-control-group {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px 12px;
+      padding: 8px 0;
+      border-top: 1px solid rgba(255,255,255,0.12);
+    }
+    .p5em-control-group-wide {
+      grid-column: 1 / -1;
+    }
+    .p5em-control-group h2 {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p5em-button-row {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .p5em-button-row button {
+      padding: 7px 8px;
+      color: rgba(255,255,255,0.78);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
     }
     .p5em-text-control {
       display: grid;
@@ -1803,6 +2130,15 @@ function serializeRuntimeConfig(config) {
     artist: config.artist,
     year: config.year,
     showTitleOverlay: config.showTitleOverlay,
+    titleOverlayFont: config.titleOverlayFont,
+    titleOverlayColor: config.titleOverlayColor,
+    titleOverlayPosition: config.titleOverlayPosition,
+    titleOverlaySize: config.titleOverlaySize,
+    qrLink: config.qrLink,
+    showQr: config.showQr,
+    qrPosition: config.qrPosition,
+    qrSize: config.qrSize,
+    qrProvider: config.qrProvider,
     seed: config.seed,
     fullscreen: config.fullscreen,
     kiosk: config.kiosk,
@@ -1842,6 +2178,58 @@ function formatTitleOverlay(config) {
   const artist = config.artist || "Artist Name";
   const year = config.year ? `, ${config.year}` : "";
   return `${title} by ${artist}${year}`;
+}
+
+function positionOptions(selected = "top-left") {
+  return [
+    ["top-left", "Top Left"],
+    ["top-center", "Top Center"],
+    ["top-right", "Top Right"],
+    ["bottom-left", "Bottom Left"],
+    ["bottom-center", "Bottom Center"],
+    ["bottom-right", "Bottom Right"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeOverlayPosition(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
+function normalizeOverlayPosition(value) {
+  const allowed = new Set(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
+  return allowed.has(value) ? value : "top-left";
+}
+
+function normalizeTitleFont(value) {
+  if (value === "sans" || value === "serif") return value;
+  return "mono";
+}
+
+function buildQrUrl(link, size, provider = DEFAULTS.qrProvider) {
+  const url = new URL(provider);
+  url.searchParams.set("size", `${size}x${size}`);
+  url.searchParams.set("data", link);
+  return url.toString();
+}
+
+function readUrlHash(url, hashParam = "hash") {
+  if (!url) return "";
+  return url.searchParams.get(hashParam) || "";
+}
+
+function safeUrl(value) {
+  try {
+    return new URL(value, window.location.href);
+  } catch {
+    return null;
+  }
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function shortenMiddle(value, max = 40) {
+  const text = String(value || "");
+  if (text.length <= max) return text;
+  const keep = Math.floor((max - 3) / 2);
+  return `${text.slice(0, keep)}...${text.slice(-keep)}`;
 }
 
 function safeName(name) {

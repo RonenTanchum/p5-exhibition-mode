@@ -1,0 +1,36 @@
+{
+  "name": "p5-exhibition-mode",
+  "version": "0.1.0",
+  "description": "Gallery-ready runtime controls for p5.js artworks.",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check src/index.js",
+    "demo": "python3 -m http.server 4177"
+  },
+  "keywords": [
+    "p5",
+    "p5js",
+    "generative-art",
+    "exhibition",
+    "kiosk",
+    "gallery",
+    "museum",
+    "creative-coding"
+  ],
+  "author": "Phenomena Labs",
+  "license": "MIT"
+}

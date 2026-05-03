@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>p5 Exhibition Mode Demo</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      overflow: hidden;
+      background: #050505;
+      color: white;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    .demo-note {
+      position: fixed;
+      left: 24px;
+      bottom: 24px;
+      z-index: 2;
+      max-width: 30ch;
+      color: rgba(255,255,255,0.56);
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-note">Click once for fullscreen. Shift + G opens the runtime panel.</div>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+  <script type="module" src="./sketch.js"></script>
+</body>
+</html>

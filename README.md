@@ -66,7 +66,7 @@ The helper serves that folder, so playlist entries can use stable paths such as:
 ./ClassicalRevival/index.html
 ```
 
-Without the helper server, use **Drop Folder** for temporary preview. Drop the complete artwork folder, not only `index.html`, so relative scripts and assets can be mapped into the preview.
+Without the helper server, use **Drop HTML** for temporary preview. A single HTML file works only when it is self-contained or uses absolute asset URLs.
 
 ## Basic Usage
 
@@ -231,7 +231,7 @@ You can also edit the playlist directly inside the runtime panel:
 8. Set **Playlist Interval** using seconds, minutes, or hours.
 9. Set **Hash Interval** separately when Random `?hash=` should reseed the current URL faster or slower than the URL rotation.
 10. Use **Preview** on any row to load that entry into the iframe immediately.
-11. Use **Drop Folder** for temporary preview of a local artwork folder.
+11. Use **Drop HTML** for temporary preview of a local HTML file.
 
 Valid playlist entries:
 
@@ -243,7 +243,7 @@ https://art.phenomenalabs.com/Rococo/index.html
 https://example.com/live-generative-work
 ```
 
-Browser security note: **Drop Folder** is temporary preview only. Browsers do not expose real filesystem paths to webpages, so dropping or choosing a file cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` and run the helper server so those paths resolve.
+Browser security note: **Drop HTML** is temporary preview only. Browsers do not expose real filesystem paths to webpages, so dropping or choosing a file cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` and run the helper server so those paths resolve.
 
 Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, and cursor mode. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
 

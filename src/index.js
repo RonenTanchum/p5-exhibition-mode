@@ -945,7 +945,7 @@ function createPanel(config, api) {
           </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Type a served local path or web URL. Apply URLs persists settings. Drop or choose a complete artwork folder for temporary preview with relative assets.</p>
+        <p>Type a served local path or web URL. Apply URLs persists settings. Drop HTML is temporary preview only and is available for local rows.</p>
       </section>
     </div>
     <div class="p5em-panel-actions">
@@ -1036,7 +1036,7 @@ function createPanel(config, api) {
       if (row) updatePlaylistRowKind(row, event.target.value);
     }
     if (event.target?.dataset?.input === "playlist-file") {
-      previewDroppedArtwork(event.target, api);
+      previewDroppedArtwork(event.target, api, event.target.closest(".p5em-playlist-row"));
       event.target.value = "";
     }
   });
@@ -1107,8 +1107,8 @@ function addPlaylistRow(panel, value = "") {
     <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
     <button type="button" data-action="playlist-preview">Preview</button>
     <label class="p5em-drop-zone">
-      <span>Drop Folder</span>
-      <input data-input="playlist-file" type="file" webkitdirectory multiple>
+      <span>Drop HTML</span>
+      <input data-input="playlist-file" type="file" accept=".html,text/html">
     </label>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
   `;
@@ -1121,12 +1121,13 @@ function addPlaylistRow(panel, value = "") {
   dropZone.addEventListener("drop", (event) => {
     event.preventDefault();
     dropZone.classList.remove("is-dragging");
-    previewDroppedArtwork(event.dataTransfer, panel.__p5emApi);
+    previewDroppedArtwork(event.dataTransfer, panel.__p5emApi, row);
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
     container.dataset.editing = "true";
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("input", () => {
+    row.querySelector("[data-input='playlist-url']").dataset.temporaryPreview = "false";
     container.dataset.dirty = "true";
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("blur", () => {
@@ -1143,12 +1144,20 @@ function updatePlaylistRowKind(row, kind) {
   }
 }
 
-async function previewDroppedArtwork(source, api) {
+async function previewDroppedArtwork(source, api, row = null) {
   const files = await collectDroppedFiles(source);
   const html = findPreviewHtml(files);
   if (!html) return;
   const url = await createDroppedArtworkUrl(html, files);
   api.previewPlaylistUrl(url);
+  markTemporaryPreview(row, getDroppedFilePath(html));
+}
+
+function markTemporaryPreview(row, filename) {
+  const input = row?.querySelector("[data-input='playlist-url']");
+  if (!input) return;
+  input.value = `[temporary preview] ${filename}`;
+  input.dataset.temporaryPreview = "true";
 }
 
 async function collectDroppedFiles(source) {
@@ -1267,6 +1276,7 @@ function pathBasename(value) {
 
 function collectPlaylistRows(panel) {
   return Array.from(panel.querySelectorAll("[data-input='playlist-url']"))
+    .filter((input) => input.dataset.temporaryPreview !== "true")
     .map((input) => input.value.trim())
     .filter(Boolean);
 }
@@ -1570,6 +1580,9 @@ function injectStyles() {
       grid-template-columns: 104px minmax(0, 1fr) auto auto 26px;
       gap: 7px;
       align-items: center;
+    }
+    .p5em-playlist-row[data-kind="url"] .p5em-drop-zone {
+      display: none;
     }
     .p5em-playlist-row input[type="text"],
     .p5em-playlist-row select {

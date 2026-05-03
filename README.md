@@ -48,7 +48,7 @@ import { createExhibitionMode } from "./src/index.js";
 
 ## Local Helper Server
 
-For browser security reasons, a webpage cannot read the real path returned by the operating-system file picker. To make local browsing useful in a kiosk or studio setup, run the included helper server from the folder that contains your sketches:
+For browser security reasons, a webpage cannot read the real path returned by the operating-system file picker. For production kiosk setups, run the included helper server from the folder that contains your sketches and type served paths into the playlist:
 
 ```bash
 npx p5-exhibition-helper --root /Users/you/Artworks --port 4177
@@ -60,13 +60,13 @@ Then open:
 http://127.0.0.1:4177/
 ```
 
-The helper serves that folder and exposes `GET /__p5em/files`, which the Playlist tab uses for **Browse**. Selecting an item inserts a real served path such as:
+The helper serves that folder, so playlist entries can use stable paths such as:
 
 ```txt
 ./ClassicalRevival/index.html
 ```
 
-Without the helper server, use **Drop HTML** for temporary preview of a single selected HTML file.
+Without the helper server, use **Drop Folder** for temporary preview. Drop the complete artwork folder, not only `index.html`, so relative scripts and assets can be mapped into the preview.
 
 ## Basic Usage
 
@@ -222,7 +222,7 @@ You can also edit the playlist directly inside the runtime panel:
 8. Set **Playlist Interval** using seconds, minutes, or hours.
 9. Set **Hash Interval** separately when Random `?hash=` should reseed the current URL faster or slower than the URL rotation.
 10. Use **Preview** on any row to load that entry into the iframe immediately.
-11. Use **Drop HTML** for temporary preview of a standalone local HTML file.
+11. Use **Drop Folder** for temporary preview of a local artwork folder.
 
 Valid playlist entries:
 
@@ -234,7 +234,7 @@ https://art.phenomenalabs.com/Rococo/index.html
 https://example.com/live-generative-work
 ```
 
-Browser security note: **Drop HTML** is temporary preview only. Browsers do not expose real filesystem paths to webpages, so dropping or choosing a file cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` or use the helper server so **Browse** can insert served paths.
+Browser security note: **Drop Folder** is temporary preview only. Browsers do not expose real filesystem paths to webpages, so dropping or choosing a file cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` and run the helper server so those paths resolve.
 
 Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, and cursor mode. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
 

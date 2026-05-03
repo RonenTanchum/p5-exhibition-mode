@@ -888,7 +888,7 @@ function createPanel(config, api) {
           </label>
         </div>
         <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Type a served local path or web URL. Apply URLs persists settings for refreshes. Drop HTML previews a temporary local file; it cannot save a filesystem path.</p>
+        <p>Type a served local path or web URL. Apply URLs persists settings. Drop or choose a complete artwork folder for temporary preview with relative assets.</p>
       </section>
     </div>
     <div class="p5em-panel-actions">
@@ -932,10 +932,6 @@ function createPanel(config, api) {
       const input = row?.querySelector("[data-input='playlist-url']");
       if (input?.value) api.previewPlaylistUrl(input.value);
     }
-    if (action === "playlist-browse") {
-      const row = event.target.closest(".p5em-playlist-row");
-      openPlaylistBrowser(row, config, api);
-    }
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
   });
@@ -973,9 +969,7 @@ function createPanel(config, api) {
       if (row) updatePlaylistRowKind(row, event.target.value);
     }
     if (event.target?.dataset?.input === "playlist-file") {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      previewDroppedHtml(file, api);
+      previewDroppedArtwork(event.target, api);
       event.target.value = "";
     }
   });
@@ -1045,10 +1039,9 @@ function addPlaylistRow(panel, value = "") {
     </select>
     <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
     <button type="button" data-action="playlist-preview">Preview</button>
-    <button type="button" data-action="playlist-browse">Browse</button>
     <label class="p5em-drop-zone">
-      <span>Drop HTML</span>
-      <input data-input="playlist-file" type="file" accept=".html,text/html">
+      <span>Drop Folder</span>
+      <input data-input="playlist-file" type="file" webkitdirectory multiple>
     </label>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
   `;
@@ -1061,8 +1054,7 @@ function addPlaylistRow(panel, value = "") {
   dropZone.addEventListener("drop", (event) => {
     event.preventDefault();
     dropZone.classList.remove("is-dragging");
-    const file = Array.from(event.dataTransfer?.files || []).find((item) => item.type === "text/html" || item.name.toLowerCase().endsWith(".html"));
-    if (file) previewDroppedHtml(file, panel.__p5emApi);
+    previewDroppedArtwork(event.dataTransfer, panel.__p5emApi);
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("focus", () => {
     container.dataset.editing = "true";
@@ -1084,62 +1076,126 @@ function updatePlaylistRowKind(row, kind) {
   }
 }
 
-function previewDroppedHtml(file, api) {
-  const url = URL.createObjectURL(file);
+async function previewDroppedArtwork(source, api) {
+  const files = await collectDroppedFiles(source);
+  const html = findPreviewHtml(files);
+  if (!html) return;
+  const url = await createDroppedArtworkUrl(html, files);
   api.previewPlaylistUrl(url);
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-async function openPlaylistBrowser(row, config, api) {
-  if (!row) return;
-  closePlaylistBrowsers(row.closest("[data-playlist-rows]"));
-  const endpoint = config.localFiles?.endpoint || DEFAULTS.localFiles.endpoint;
-  try {
-    const response = await fetch(endpoint, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Local helper returned ${response.status}`);
-    const data = await response.json();
-    const files = Array.isArray(data.files) ? data.files : [];
-    if (!files.length) throw new Error("No HTML files found by local helper");
-    renderPlaylistBrowser(row, files, api);
-  } catch {
-    if (config.localFiles?.fallbackFilePreview !== false) {
-      row.querySelector("[data-input='playlist-file']")?.click();
-    }
-  }
-}
-
-function renderPlaylistBrowser(row, files, api) {
-  const browser = document.createElement("div");
-  browser.className = "p5em-file-browser";
-  browser.innerHTML = `
-    <div class="p5em-file-browser-head">
-      <span>Served HTML Files</span>
-      <button type="button" data-action="playlist-browser-close" aria-label="Close local file browser">×</button>
-    </div>
-    <div class="p5em-file-browser-list"></div>
-  `;
-  const list = browser.querySelector(".p5em-file-browser-list");
-  files.slice(0, 80).forEach((file) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = file.path || file.name || "";
-    button.addEventListener("click", () => {
-      const input = row.querySelector("[data-input='playlist-url']");
-      if (input) {
-        input.value = file.path || "";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+async function collectDroppedFiles(source) {
+  const items = Array.from(source?.items || []);
+  if (items.length) {
+    const files = [];
+    await Promise.all(items.map(async (item) => {
+      const entry = item.webkitGetAsEntry?.();
+      if (entry) await collectEntryFiles(entry, "", files);
+      else {
+        const file = item.getAsFile?.();
+        if (file) files.push(file);
       }
-      api.previewPlaylistUrl(file.path || "");
-      browser.remove();
-    });
-    list.appendChild(button);
-  });
-  browser.querySelector("[data-action='playlist-browser-close']").addEventListener("click", () => browser.remove());
-  row.insertAdjacentElement("afterend", browser);
+    }));
+    return files;
+  }
+  return Array.from(source?.files || []);
 }
 
-function closePlaylistBrowsers(container) {
-  container?.querySelectorAll(".p5em-file-browser").forEach((el) => el.remove());
+function collectEntryFiles(entry, prefix, files) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((file) => {
+        file.p5emPath = `${prefix}${file.name}`;
+        files.push(file);
+        resolve();
+      }, resolve);
+      return;
+    }
+    if (!entry.isDirectory) {
+      resolve();
+      return;
+    }
+    const reader = entry.createReader();
+    const readBatch = () => {
+      reader.readEntries(async (entries) => {
+        if (!entries.length) {
+          resolve();
+          return;
+        }
+        await Promise.all(entries.map((child) => collectEntryFiles(child, `${prefix}${entry.name}/`, files)));
+        readBatch();
+      }, resolve);
+    };
+    readBatch();
+  });
+}
+
+function findPreviewHtml(files) {
+  const htmlFiles = files.filter((file) => getDroppedFilePath(file).toLowerCase().endsWith(".html"));
+  return htmlFiles.find((file) => pathBasename(getDroppedFilePath(file)).toLowerCase() === "index.html") || htmlFiles[0] || null;
+}
+
+async function createDroppedArtworkUrl(htmlFile, files) {
+  const objectUrls = new Map();
+  const cleanup = [];
+  const htmlPath = normalizePath(getDroppedFilePath(htmlFile));
+  const htmlDir = pathDirname(htmlPath);
+
+  files.forEach((file) => {
+    const url = URL.createObjectURL(file);
+    cleanup.push(url);
+    objectUrls.set(normalizePath(getDroppedFilePath(file)), url);
+  });
+
+  const source = await htmlFile.text();
+  const rewritten = source.replace(/\b(src|href|poster)=["']([^"']+)["']/gi, (match, attr, value) => {
+    const replacement = resolveDroppedAsset(value, htmlDir, objectUrls);
+    return replacement ? `${attr}="${replacement}"` : match;
+  }).replace(/url\((["']?)([^"')]+)\1\)/gi, (match, quote, value) => {
+    const replacement = resolveDroppedAsset(value, htmlDir, objectUrls);
+    return replacement ? `url("${replacement}")` : match;
+  });
+  const htmlUrl = URL.createObjectURL(new Blob([rewritten], { type: "text/html" }));
+  cleanup.push(htmlUrl);
+  setTimeout(() => cleanup.forEach((url) => URL.revokeObjectURL(url)), 300000);
+  return htmlUrl;
+}
+
+function resolveDroppedAsset(value, baseDir, objectUrls) {
+  if (/^(https?:|data:|blob:|#|mailto:|tel:)/i.test(value)) return null;
+  const [pathPart, suffix = ""] = value.split(/(?=[?#])/);
+  const normalized = normalizePath(joinPath(baseDir, pathPart));
+  return objectUrls.get(normalized) ? `${objectUrls.get(normalized)}${suffix}` : null;
+}
+
+function getDroppedFilePath(file) {
+  return normalizePath(file.webkitRelativePath || file.p5emPath || file.name);
+}
+
+function normalizePath(value) {
+  const parts = String(value || "").replace(/\\/g, "/").split("/");
+  const out = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return out.join("/");
+}
+
+function joinPath(base, value) {
+  return normalizePath(`${base ? `${base}/` : ""}${value}`);
+}
+
+function pathDirname(value) {
+  const parts = normalizePath(value).split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+function pathBasename(value) {
+  const parts = normalizePath(value).split("/");
+  return parts[parts.length - 1] || "";
 }
 
 function collectPlaylistRows(panel) {
@@ -1413,12 +1469,9 @@ function injectStyles() {
     }
     .p5em-playlist-row {
       display: grid;
-      grid-template-columns: 104px minmax(0, 1fr) auto auto auto 26px;
+      grid-template-columns: 104px minmax(0, 1fr) auto auto 26px;
       gap: 7px;
       align-items: center;
-    }
-    .p5em-playlist-row[data-kind="url"] [data-action="playlist-browse"] {
-      display: none;
     }
     .p5em-playlist-row input[type="text"],
     .p5em-playlist-row select {
@@ -1474,47 +1527,6 @@ function injectStyles() {
       height: 27px;
       line-height: 1;
       padding: 0;
-    }
-    .p5em-file-browser {
-      padding: 8px;
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(0,0,0,0.32);
-    }
-    .p5em-file-browser-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-      color: rgba(255,255,255,0.58);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-    .p5em-file-browser-head button {
-      width: 24px;
-      height: 22px;
-      color: rgba(255,255,255,0.78);
-      background: transparent;
-      border: 1px solid rgba(255,255,255,0.18);
-    }
-    .p5em-file-browser-list {
-      display: grid;
-      gap: 5px;
-      max-height: 150px;
-      overflow: auto;
-    }
-    .p5em-file-browser-list button {
-      overflow: hidden;
-      padding: 6px 7px;
-      color: rgba(255,255,255,0.78);
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.12);
-      font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      text-align: left;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
     .p5em-playlist-editor p {
       margin: 6px 0 0;

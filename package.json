@@ -16,7 +16,12 @@
       "import": "./src/sensors.js"
     }
   },
+  "bin": {
+    "p5-exhibition-helper": "./bin/exhibition-helper.mjs",
+    "exhibition-helper": "./bin/exhibition-helper.mjs"
+  },
   "files": [
+    "bin",
     "src",
     "schemas",
     "templates",
@@ -25,8 +30,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check src/index.js && node --check src/sensors.js",
-    "demo": "python3 -m http.server 4177"
+    "check": "node --check src/index.js && node --check src/sensors.js && node --check bin/exhibition-helper.mjs",
+    "demo": "node bin/exhibition-helper.mjs --root . --port 4177"
   },
   "keywords": [
     "p5",

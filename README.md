@@ -46,6 +46,28 @@ For local development before publishing:
 import { createExhibitionMode } from "./src/index.js";
 ```
 
+## Local Helper Server
+
+For browser security reasons, a webpage cannot read the real path returned by the operating-system file picker. To make local browsing useful in a kiosk or studio setup, run the included helper server from the folder that contains your sketches:
+
+```bash
+npx p5-exhibition-helper --root /Users/you/Artworks --port 4177
+```
+
+Then open:
+
+```txt
+http://127.0.0.1:4177/
+```
+
+The helper serves that folder and exposes `GET /__p5em/files`, which the Playlist tab uses for **Browse**. Selecting an item inserts a real served path such as:
+
+```txt
+./ClassicalRevival/index.html
+```
+
+Without the helper server, Browse falls back to temporary preview mode for a single selected HTML file.
+
 ## Basic Usage
 
 ```js
@@ -64,6 +86,10 @@ const exhibition = createExhibitionMode({
   maxPixelRatio: 2,
   rotation: 0,
   refreshOnRotation: true,
+  localFiles: {
+    endpoint: "/__p5em/files",
+    fallbackFilePreview: true
+  },
   watchdog: {
     enabled: true,
     minFps: 12,
@@ -156,6 +182,7 @@ Useful methods:
 - `setPlaylistIntervalParts(value, unit)` and `setPlaylistHashIntervalParts(value, unit)`
 - `nextPlaylistItem()`, `previousPlaylistItem()`, `previewPlaylistUrl(url)`
 - `getConfig()`, `loadConfig(config)`, `saveConfig()`, `exportConfig()`
+- `localFiles.endpoint` can point at a helper endpoint such as `/__p5em/files`
 
 ## Playlist Mode
 

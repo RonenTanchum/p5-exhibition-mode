@@ -47,6 +47,10 @@ const DEFAULTS = {
     hashParam: "hash",
     startIndex: 0
   },
+  localFiles: {
+    endpoint: "/__p5em/files",
+    fallbackFilePreview: true
+  },
   persist: true,
   storageKey: "p5-exhibition-mode-config",
   target: null
@@ -928,7 +932,8 @@ function createPanel(config, api) {
       if (input?.value) api.previewPlaylistUrl(input.value);
     }
     if (action === "playlist-browse") {
-      event.target.closest(".p5em-playlist-row")?.querySelector("[data-input='playlist-file']")?.click();
+      const row = event.target.closest(".p5em-playlist-row");
+      openPlaylistBrowser(row, config, api);
     }
     if (action === "playlist-prev") api.previousPlaylistItem();
     if (action === "playlist-next") api.nextPlaylistItem();
@@ -1063,6 +1068,58 @@ function updatePlaylistRowKind(row, kind) {
   if (input) {
     input.placeholder = kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
   }
+}
+
+async function openPlaylistBrowser(row, config, api) {
+  if (!row) return;
+  closePlaylistBrowsers(row.closest("[data-playlist-rows]"));
+  const endpoint = config.localFiles?.endpoint || DEFAULTS.localFiles.endpoint;
+  try {
+    const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Local helper returned ${response.status}`);
+    const data = await response.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    if (!files.length) throw new Error("No HTML files found by local helper");
+    renderPlaylistBrowser(row, files, api);
+  } catch {
+    if (config.localFiles?.fallbackFilePreview !== false) {
+      row.querySelector("[data-input='playlist-file']")?.click();
+    }
+  }
+}
+
+function renderPlaylistBrowser(row, files, api) {
+  const browser = document.createElement("div");
+  browser.className = "p5em-file-browser";
+  browser.innerHTML = `
+    <div class="p5em-file-browser-head">
+      <span>Served HTML Files</span>
+      <button type="button" data-action="playlist-browser-close" aria-label="Close local file browser">×</button>
+    </div>
+    <div class="p5em-file-browser-list"></div>
+  `;
+  const list = browser.querySelector(".p5em-file-browser-list");
+  files.slice(0, 80).forEach((file) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = file.path || file.name || "";
+    button.addEventListener("click", () => {
+      const input = row.querySelector("[data-input='playlist-url']");
+      if (input) {
+        input.value = file.path || "";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      api.previewPlaylistUrl(file.path || "");
+      browser.remove();
+    });
+    list.appendChild(button);
+  });
+  browser.querySelector("[data-action='playlist-browser-close']").addEventListener("click", () => browser.remove());
+  row.insertAdjacentElement("afterend", browser);
+}
+
+function closePlaylistBrowsers(container) {
+  container?.querySelectorAll(".p5em-file-browser").forEach((el) => el.remove());
 }
 
 function collectPlaylistRows(panel) {
@@ -1370,6 +1427,47 @@ function injectStyles() {
       line-height: 1;
       padding: 0;
     }
+    .p5em-file-browser {
+      padding: 8px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.32);
+    }
+    .p5em-file-browser-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p5em-file-browser-head button {
+      width: 24px;
+      height: 22px;
+      color: rgba(255,255,255,0.78);
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+    .p5em-file-browser-list {
+      display: grid;
+      gap: 5px;
+      max-height: 150px;
+      overflow: auto;
+    }
+    .p5em-file-browser-list button {
+      overflow: hidden;
+      padding: 6px 7px;
+      color: rgba(255,255,255,0.78);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.12);
+      font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .p5em-playlist-editor p {
       margin: 6px 0 0;
       color: rgba(255,255,255,0.42);
@@ -1523,6 +1621,7 @@ function mergeRuntimeConfig(base, next = {}) {
     watchdog: { ...(base.watchdog || {}), ...(next.watchdog || {}) },
     logging: { ...(base.logging || {}), ...(next.logging || {}) },
     healthCheck: { ...(base.healthCheck || {}), ...(next.healthCheck || {}) },
+    localFiles: { ...(base.localFiles || {}), ...(next.localFiles || {}) },
     playlist
   };
 }
@@ -1551,6 +1650,7 @@ function serializeRuntimeConfig(config) {
     watchdog: { ...config.watchdog },
     logging: { ...config.logging },
     healthCheck: { ...config.healthCheck },
+    localFiles: { ...config.localFiles },
     playlist: Array.isArray(config.playlist) ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist } : { ...config.playlist },
     persist: config.persist,
     storageKey: config.storageKey

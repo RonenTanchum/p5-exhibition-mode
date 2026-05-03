@@ -21,6 +21,7 @@ export type ExhibitionModeOptions = {
   watchdog?: ExhibitionWatchdogOptions;
   logging?: ExhibitionLoggingOptions;
   healthCheck?: ExhibitionHealthCheckOptions;
+  localFiles?: ExhibitionLocalFilesOptions;
   playlist?: ExhibitionPlaylistOptions | Array<string | ExhibitionPlaylistItem>;
   persist?: boolean;
   storageKey?: string;
@@ -63,6 +64,11 @@ export type ExhibitionHealthCheckOptions = {
   enabled?: boolean;
   url?: string;
   intervalSeconds?: number;
+};
+
+export type ExhibitionLocalFilesOptions = {
+  endpoint?: string;
+  fallbackFilePreview?: boolean;
 };
 
 export type ExhibitionPlaylistItem = {

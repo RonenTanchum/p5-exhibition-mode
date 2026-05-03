@@ -55,6 +55,14 @@ const DEFAULTS = {
     url: "",
     intervalSeconds: 60
   },
+  capture: {
+    filename: "exhibition-capture",
+    codec: "auto",
+    videoBitsPerSecond: 30000000,
+    frameRate: 60,
+    includeAudio: false,
+    hidePanelDuringCapture: true
+  },
   playlist: {
     enabled: false,
     items: [],
@@ -71,6 +79,7 @@ const DEFAULTS = {
     absolutePrefix: "/__p5em/abs/",
     fallbackFilePreview: true
   },
+  urlParams: true,
   persist: true,
   storageKey: "p5-exhibition-mode-config",
   target: null
@@ -84,7 +93,9 @@ const STYLE_ID = "p5-exhibition-mode-style";
 export function createExhibitionMode(options = {}) {
   const baseConfig = mergeRuntimeConfig(DEFAULTS, options);
   const savedConfig = baseConfig.persist ? readRuntimeConfig(baseConfig.storageKey) : null;
-  const config = savedConfig ? mergeRuntimeConfig(baseConfig, savedConfig) : baseConfig;
+  const persistedConfig = savedConfig ? mergeRuntimeConfig(baseConfig, savedConfig) : baseConfig;
+  const urlConfig = baseConfig.urlParams === false ? null : readUrlRuntimeConfig(window.location);
+  const config = urlConfig ? mergeRuntimeConfig(persistedConfig, urlConfig) : persistedConfig;
   const state = {
     startedAt: performance.now(),
     lastFrameAt: performance.now(),
@@ -112,7 +123,16 @@ export function createExhibitionMode(options = {}) {
     currentSource: window.location.href,
     lastLoggedHash: "",
     hashRecording: false,
-    hashRecords: []
+    hashRecords: [],
+    captureRecorder: null,
+    captureStream: null,
+    captureChunks: [],
+    captureStartedAt: 0,
+    captureStatus: "Idle",
+    captureMimeType: "",
+    captureDirectoryHandle: null,
+    captureDirectoryName: "",
+    captureWasPanelOpen: false
   };
 
   function setup() {
@@ -225,7 +245,7 @@ export function createExhibitionMode(options = {}) {
     if (!canvas || typeof canvas.toDataURL !== "function") return null;
     const dataUrl = canvas.toDataURL("image/png");
     if (typeof config.onScreenshot === "function") config.onScreenshot(dataUrl);
-    else downloadDataUrl(dataUrl, safeName(config.title) + "-screenshot.png");
+    else saveCaptureDataUrl(dataUrl, safeName(config.title) + "-screenshot.png");
     return dataUrl;
   }
 
@@ -276,6 +296,11 @@ export function createExhibitionMode(options = {}) {
       droppedFrames: state.droppedFrames,
       logs: state.logs.slice(-80),
       logCount: state.logs.length,
+      captureRecording: Boolean(state.captureRecorder && state.captureRecorder.state === "recording"),
+      captureStatus: state.captureStatus,
+      captureDurationSeconds: state.captureStartedAt ? Math.round((performance.now() - state.captureStartedAt) / 1000) : 0,
+      captureMimeType: state.captureMimeType || "Browser default",
+      captureOutput: state.captureDirectoryName || "Browser downloads",
       playlistEnabled: Boolean(state.playlistEnabled),
       playlistIndex: state.playlistIndex,
       playlistCount: playlistItems().length,
@@ -328,12 +353,28 @@ export function createExhibitionMode(options = {}) {
 
   function installKeyboard() {
     add(document, "keydown", (event) => {
+      if (event.key.toLowerCase() === "c" && event.shiftKey && state.captureRecorder?.state === "recording") {
+        event.preventDefault();
+        stopCapture();
+        return;
+      }
       if (event.key.toLowerCase() === config.panelKey.toLowerCase() && event.shiftKey) {
         event.preventDefault();
+        if (state.captureRecorder?.state === "recording") return;
         togglePanel();
       }
       if (state.panelOpen && event.key === "Escape") togglePanel(false);
     });
+    add(window, "blur", () => {
+      if (document.activeElement === state.playlistFrame) setTimeout(reclaimKeyboardFocus, 80);
+    });
+  }
+
+  function reclaimKeyboardFocus() {
+    if (state.panelOpen || document.activeElement !== state.playlistFrame) return;
+    state.playlistFrame.blur();
+    document.body.setAttribute("tabindex", "-1");
+    document.body.focus({ preventScroll: true });
   }
 
   function installActivityTracking() {
@@ -354,16 +395,19 @@ export function createExhibitionMode(options = {}) {
     if (shouldHide !== state.cursorHidden) {
       state.cursorHidden = shouldHide;
       document.documentElement.classList.toggle("p5em-hide-cursor", shouldHide);
+      syncPlaylistFrameRuntime();
     }
   }
 
   function showCursor() {
     state.cursorHidden = false;
     document.documentElement.classList.remove("p5em-hide-cursor");
+    syncPlaylistFrameRuntime();
   }
 
   function updateInputLockClasses() {
     document.documentElement.classList.toggle("p5em-lock-touch", Boolean(config.disableTouchGestures));
+    syncPlaylistFrameRuntime();
   }
 
   function applyKioskMode() {
@@ -373,11 +417,13 @@ export function createExhibitionMode(options = {}) {
   function applyCursorMode() {
     document.documentElement.classList.toggle("p5em-hide-cursor", Boolean(config.hideCursor && config.hideCursorMode === "always"));
     state.cursorHidden = Boolean(config.hideCursor && config.hideCursorMode === "always");
+    syncPlaylistFrameRuntime();
   }
 
   function setOption(key, value) {
     config[key] = value;
     if (key === "disableTouchGestures") updateInputLockClasses();
+    if (key === "disableContextMenu") syncPlaylistFrameRuntime();
     if (key === "hideCursor") value ? applyCursorMode() : showCursor();
     if (key === "kiosk") applyKioskMode();
     if (key === "rotation") {
@@ -722,11 +768,50 @@ export function createExhibitionMode(options = {}) {
     state.playlistFrame = document.createElement("iframe");
     state.playlistFrame.className = "p5em-playlist-frame";
     state.playlistFrame.title = "Exhibition playlist artwork";
+    state.playlistFrame.tabIndex = -1;
     state.playlistFrame.setAttribute("allow", "autoplay; fullscreen");
     state.playlistFrame.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
     state.playlistFrame.hidden = true;
+    add(state.playlistFrame, "load", syncPlaylistFrameRuntime);
+    add(state.playlistFrame, "focus", () => setTimeout(reclaimKeyboardFocus, 80));
+    add(state.playlistFrame, "pointerdown", () => setTimeout(reclaimKeyboardFocus, 120), { passive: true });
     document.body.prepend(state.playlistFrame);
+    syncPlaylistFrameRuntime();
     return state.playlistFrame;
+  }
+
+  function syncPlaylistFrameRuntime() {
+    if (!state.playlistFrame) return;
+    state.playlistFrame.style.cursor = config.hideCursor && state.cursorHidden ? "none" : "";
+    try {
+      const doc = state.playlistFrame.contentDocument;
+      if (!doc?.documentElement) return;
+      injectChildRuntimeStyle(doc);
+      doc.documentElement.classList.toggle("p5em-child-hide-cursor", Boolean(config.hideCursor && state.cursorHidden));
+      doc.documentElement.classList.toggle("p5em-child-lock-touch", Boolean(config.disableTouchGestures));
+      if (!doc.__p5emRuntimeLocksInstalled) {
+        doc.addEventListener("contextmenu", (event) => {
+          if (config.disableContextMenu) event.preventDefault();
+        }, { capture: true });
+        doc.addEventListener("auxclick", (event) => {
+          if (config.disableContextMenu && event.button === 2) event.preventDefault();
+        }, { capture: true });
+        doc.addEventListener("mousedown", (event) => {
+          if (config.disableContextMenu && event.button === 2) event.preventDefault();
+        }, { capture: true });
+        ["gesturestart", "gesturechange", "gestureend"].forEach((type) => {
+          doc.addEventListener(type, (event) => {
+            if (config.disableTouchGestures) event.preventDefault();
+          }, { passive: false });
+        });
+        doc.addEventListener("touchmove", (event) => {
+          if (config.disableTouchGestures) event.preventDefault();
+        }, { passive: false });
+        doc.__p5emRuntimeLocksInstalled = true;
+      }
+    } catch {
+      // Cross-origin playlist URLs cannot be modified from the parent page.
+    }
   }
 
   function tickPlaylist(now) {
@@ -758,6 +843,10 @@ export function createExhibitionMode(options = {}) {
 
   function healthCheckConfig() {
     return { ...DEFAULTS.healthCheck, ...(config.healthCheck || {}) };
+  }
+
+  function captureConfig() {
+    return { ...DEFAULTS.capture, ...(config.capture || {}) };
   }
 
   function playlistItems() {
@@ -981,6 +1070,158 @@ export function createExhibitionMode(options = {}) {
     return snapshot;
   }
 
+  function setCaptureOptions(next = {}) {
+    config.capture = {
+      ...captureConfig(),
+      ...next,
+      videoBitsPerSecond: Number(next.videoBitsPerSecond ?? captureConfig().videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond,
+      frameRate: Number(next.frameRate ?? captureConfig().frameRate) || DEFAULTS.capture.frameRate
+    };
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  async function startCapture(next = {}) {
+    if (state.captureRecorder?.state === "recording") return api;
+    setCaptureOptions(next);
+    const capture = captureConfig();
+    if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
+      state.captureStatus = "Screen recording is not supported in this browser";
+      log("error", state.captureStatus);
+      updatePanel();
+      return api;
+    }
+    const mimeType = resolveCaptureMimeType(capture.codec);
+    if (!mimeType && capture.codec && !["auto", "default"].includes(capture.codec)) {
+      log("warn", `Requested capture codec is not supported by this browser: ${capture.codec}`);
+    }
+    try {
+      state.captureStatus = "Requesting screen capture";
+      state.captureWasPanelOpen = state.panelOpen;
+      await enterFullscreen();
+      togglePanel(false);
+      document.documentElement.classList.add("p5em-capturing", "p5em-hide-cursor");
+      state.cursorHidden = true;
+      updatePanel();
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: Number(capture.frameRate) || DEFAULTS.capture.frameRate,
+          cursor: "never",
+          displaySurface: "browser"
+        },
+        audio: Boolean(capture.includeAudio),
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+        surfaceSwitching: "exclude"
+      });
+      const options = {
+        videoBitsPerSecond: Number(capture.videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond
+      };
+      if (mimeType) options.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, options);
+      state.captureRecorder = recorder;
+      state.captureStream = stream;
+      state.captureChunks = [];
+      state.captureStartedAt = performance.now();
+      state.captureMimeType = recorder.mimeType || mimeType || "";
+      state.captureStatus = "Recording";
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data?.size) state.captureChunks.push(event.data);
+      });
+      recorder.addEventListener("stop", finishCapture);
+      stream.getTracks().forEach((track) => {
+        track.addEventListener("ended", () => {
+          if (state.captureRecorder?.state === "recording") stopCapture();
+        }, { once: true });
+      });
+      recorder.start(1000);
+      log("info", `Capture started: ${state.captureMimeType || "browser default"}`);
+    } catch (error) {
+      state.captureStatus = "Capture cancelled or unavailable";
+      state.captureRecorder = null;
+      state.captureStream = null;
+      state.captureStartedAt = 0;
+      document.documentElement.classList.remove("p5em-capturing");
+      if (!config.hideCursor) showCursor();
+      log("warn", state.captureStatus, { message: error?.message || String(error) });
+    }
+    updatePanel();
+    return api;
+  }
+
+  function stopCapture() {
+    if (!state.captureRecorder || state.captureRecorder.state === "inactive") return api;
+    state.captureStatus = "Stopping";
+    state.captureRecorder.stop();
+    state.captureStream?.getTracks().forEach((track) => track.stop());
+    updatePanel();
+    return api;
+  }
+
+  async function finishCapture() {
+    const mimeType = state.captureMimeType || state.captureChunks[0]?.type || "video/webm";
+    const blob = new Blob(state.captureChunks, { type: mimeType });
+    const filename = captureFilename(captureConfig().filename, mimeType);
+    await saveCaptureBlob(blob, filename);
+    log("info", `Capture saved: ${filename}`, { mimeType, bytes: blob.size });
+    state.captureRecorder = null;
+    state.captureStream = null;
+    state.captureChunks = [];
+    state.captureStartedAt = 0;
+    state.captureStatus = `Saved ${filename}`;
+    document.documentElement.classList.remove("p5em-capturing");
+    if (!config.hideCursor) showCursor();
+    updatePanel();
+  }
+
+  async function chooseCaptureFolder() {
+    if (!window.showDirectoryPicker) {
+      state.captureStatus = "Folder picker unavailable; using browser downloads";
+      log("warn", state.captureStatus);
+      updatePanel();
+      return api;
+    }
+    try {
+      state.captureDirectoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      state.captureDirectoryName = state.captureDirectoryHandle.name || "Selected folder";
+      state.captureStatus = `Output folder: ${state.captureDirectoryName}`;
+    } catch {
+      state.captureStatus = "Folder selection cancelled";
+    }
+    updatePanel();
+    return api;
+  }
+
+  async function saveCaptureBlob(blob, filename) {
+    if (state.captureDirectoryHandle) {
+      try {
+        const fileHandle = await state.captureDirectoryHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      } catch (error) {
+        log("warn", "Folder save failed; falling back to browser download", { message: error?.message || String(error) });
+      }
+    }
+    downloadBlob(blob, filename);
+  }
+
+  async function saveCaptureDataUrl(dataUrl, filename) {
+    if (state.captureDirectoryHandle) {
+      try {
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        await saveCaptureBlob(blob, filename);
+        return;
+      } catch (error) {
+        log("warn", "Still save failed; falling back to browser download", { message: error?.message || String(error) });
+      }
+    }
+    downloadDataUrl(dataUrl, filename);
+  }
+
   function startHashRecording() {
     state.hashRecording = true;
     recordHashSample("start");
@@ -1143,12 +1384,16 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
     setText("p5em-current-hash", d.currentHash ? shortenMiddle(d.currentHash, 16) : "None");
     setText("p5em-current-hash-full", d.currentHash ? shortenMiddle(d.currentHash, 24) : "None");
-    setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 34));
+    setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 22), d.currentSource || "");
     setText("p5em-hash-recording", d.hashRecording ? "Active" : "Stopped");
     setText("p5em-hash-record-count", String(d.hashRecordCount));
     setText("p5em-uptime", formatDuration(d.uptimeSeconds));
     setText("p5em-memory", d.memoryMB === null ? "Unavailable" : `${d.memoryMB} MB`);
     setText("p5em-reloads", String(d.reloadCount));
+    setText("p5em-capture-status", d.captureStatus || "Idle");
+    setText("p5em-capture-duration", formatDuration(d.captureDurationSeconds || 0));
+    setText("p5em-capture-codec", d.captureMimeType || "Browser default");
+    setText("p5em-capture-output", d.captureOutput || "Browser downloads");
     renderLogRows(state.panel, d.logs);
     setChecked("context", d.contextMenuLocked);
     setChecked("touch", d.touchGesturesLocked);
@@ -1188,11 +1433,19 @@ export function createExhibitionMode(options = {}) {
     if (hashIntervalUnit && document.activeElement !== hashIntervalUnit) hashIntervalUnit.value = normalizeIntervalUnit(playlistConfig().hashIntervalUnit);
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
+    setInputValue("capture-filename", captureConfig().filename);
+    setInputValue("capture-codec", captureConfig().codec);
+    setInputValue("capture-bitrate", Math.round((Number(captureConfig().videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond) / 1000000));
+    setInputValue("capture-fps", captureConfig().frameRate);
+    setChecked("capture-audio", captureConfig().includeAudio);
   }
 
-  function setText(key, value) {
+  function setText(key, value, title = "") {
     const el = state.panel?.querySelector(`[data-p5em="${key}"]`);
-    if (el) el.textContent = value;
+    if (el) {
+      el.textContent = value;
+      if (title) el.title = title;
+    }
   }
 
   function setChecked(key, value) {
@@ -1250,6 +1503,10 @@ export function createExhibitionMode(options = {}) {
     setPlaylistItems,
     previewPlaylistUrl,
     clearLogs,
+    startCapture,
+    stopCapture,
+    chooseCaptureFolder,
+    setCaptureOptions,
     getConfig,
     loadConfig,
     saveConfig,
@@ -1274,6 +1531,7 @@ function createPanel(config, api) {
       <button type="button" class="is-active" data-tab="runtime" role="tab" aria-selected="true">Runtime</button>
       <button type="button" data-tab="overlay" role="tab" aria-selected="false">Overlay</button>
       <button type="button" data-tab="playlist" role="tab" aria-selected="false">Playlist</button>
+      <button type="button" data-tab="capture" role="tab" aria-selected="false">Capture</button>
       <button type="button" data-tab="log" role="tab" aria-selected="false">Log</button>
     </div>
     <div class="p5em-tab-panel is-active" data-panel="runtime" role="tabpanel">
@@ -1461,6 +1719,42 @@ function createPanel(config, api) {
         <p>Type a served local path or web URL. Apply URLs persists settings. Drop HTML is temporary preview only and is available for local rows.</p>
       </section>
     </div>
+    <div class="p5em-tab-panel" data-panel="capture" role="tabpanel" hidden>
+      <section class="p5em-capture-editor">
+        <div class="p5em-panel-grid p5em-capture-status-grid">
+          ${section("Capture", [["Status", "p5em-capture-status"], ["Duration", "p5em-capture-duration"], ["Codec", "p5em-capture-codec"], ["Output", "p5em-capture-output"]])}
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Recording</h2>
+          <label class="p5em-text-control p5em-wide-control">
+            <span>Save file name</span>
+            <input data-input="capture-filename" type="text" value="${escapeAttr(captureConfigFrom(config).filename)}" placeholder="exhibition-capture">
+          </label>
+          <label class="p5em-number-control">
+            <span>Codec</span>
+            <select data-input="capture-codec">
+              ${captureCodecOptions(captureConfigFrom(config).codec)}
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Bitrate Mbps</span>
+            <input data-input="capture-bitrate" type="number" min="4" max="120" step="1" value="${Math.round((Number(captureConfigFrom(config).videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond) / 1000000)}">
+          </label>
+          <label class="p5em-number-control">
+            <span>FPS</span>
+            <input data-input="capture-fps" type="number" min="15" max="120" step="1" value="${captureConfigFrom(config).frameRate}">
+          </label>
+          ${toggle("capture-audio", "Include audio")}
+          <div class="p5em-button-row">
+            <button type="button" data-action="capture-folder">Browse Folder</button>
+            <button type="button" data-action="screenshot">Save Still</button>
+            <button type="button" data-action="capture-start">Start Recording</button>
+            <button type="button" data-action="capture-stop">Stop Recording</button>
+          </div>
+        </div>
+        <p>Capture forces fullscreen, hides this panel and cursor, and records the artwork plus overlays only. Choose the current tab or exhibition window in the browser prompt. Press Shift + C to stop without reopening the panel.</p>
+      </section>
+    </div>
     <div class="p5em-tab-panel" data-panel="log" role="tabpanel" hidden>
       <section class="p5em-log-viewer">
         <div class="p5em-log-head">
@@ -1484,6 +1778,7 @@ function createPanel(config, api) {
     </div>
     <p class="p5em-panel-hint">Shift + ${config.panelKey.toUpperCase()} toggles this panel.</p>
   `;
+  installPanelDrag(panel);
   panel.addEventListener("pointerdown", (event) => event.stopPropagation());
   panel.addEventListener("click", (event) => {
     const action = event.target?.dataset?.action;
@@ -1506,6 +1801,9 @@ function createPanel(config, api) {
     }
     if (action === "playlist-save-json") api.exportConfig();
     if (action === "runtime-load-json") panel.querySelector("[data-input='runtime-config-file']")?.click();
+    if (action === "capture-folder") api.chooseCaptureFolder();
+    if (action === "capture-start") api.startCapture(collectCaptureOptions(panel));
+    if (action === "capture-stop") api.stopCapture();
     if (action === "playlist-add") {
       addPlaylistRow(panel, "");
       const container = panel.querySelector("[data-playlist-rows]");
@@ -1537,6 +1835,7 @@ function createPanel(config, api) {
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
     if (toggle === "playlist") api.togglePlaylist(event.target.checked);
     if (toggle === "playlist-hash") api.setPlaylistRandomHash(event.target.checked);
+    if (toggle === "capture-audio") api.setCaptureOptions({ includeAudio: event.target.checked });
 
     if (event.target?.dataset?.input === "playlist-interval") {
       const unit = panel.querySelector("[data-input='playlist-interval-unit']")?.value || "seconds";
@@ -1556,6 +1855,9 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
+    }
+    if (event.target?.dataset?.input?.startsWith("capture-")) {
+      api.setCaptureOptions(collectCaptureOptions(panel));
     }
     if (event.target?.dataset?.input === "artwork-title") {
       api.setArtworkMetadata({ title: event.target.value });
@@ -1627,6 +1929,22 @@ function playlistConfigFrom(config) {
   return { ...DEFAULTS.playlist, ...(config.playlist || {}) };
 }
 
+function captureConfigFrom(config) {
+  return { ...DEFAULTS.capture, ...(config.capture || {}) };
+}
+
+function captureCodecOptions(selected = "auto") {
+  const options = [
+    ["auto", "Auto"],
+    ["h264", "H.264 MP4"],
+    ["vp9", "WebM VP9"],
+    ["vp8", "WebM VP8"],
+    ["webm", "WebM"],
+    ["default", "Browser default"]
+  ];
+  return `${options.map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`).join("")}<option value="prores" disabled>ProRes requires helper</option>`;
+}
+
 function section(title, rows) {
   return `
     <section>
@@ -1657,6 +1975,46 @@ function activatePanelTab(panel, tab) {
     section.classList.toggle("is-active", active);
     section.hidden = !active;
   });
+}
+
+function installPanelDrag(panel) {
+  const header = panel.querySelector(".p5em-panel-header");
+  if (!header) return;
+  let drag = null;
+  header.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    const rect = panel.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+    panel.classList.add("is-dragging");
+    panel.style.width = `${rect.width}px`;
+    panel.style.height = `${rect.height}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    header.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  header.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const margin = 8;
+    const left = clamp(event.clientX - drag.offsetX, margin, Math.max(margin, window.innerWidth - drag.width - margin));
+    const top = clamp(event.clientY - drag.offsetY, margin, Math.max(margin, window.innerHeight - drag.height - margin));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  });
+  const endDrag = (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    header.releasePointerCapture?.(event.pointerId);
+    panel.classList.remove("is-dragging");
+    drag = null;
+  };
+  header.addEventListener("pointerup", endDrag);
+  header.addEventListener("pointercancel", endDrag);
 }
 
 function renderLogRows(panel, logs = []) {
@@ -1890,6 +2248,18 @@ function collectPlaylistRows(panel) {
     .filter(Boolean);
 }
 
+function collectCaptureOptions(panel) {
+  const bitrateMbps = Number(panel.querySelector("[data-input='capture-bitrate']")?.value) || 30;
+  return {
+    filename: panel.querySelector("[data-input='capture-filename']")?.value || DEFAULTS.capture.filename,
+    codec: panel.querySelector("[data-input='capture-codec']")?.value || DEFAULTS.capture.codec,
+    videoBitsPerSecond: Math.max(1, bitrateMbps) * 1000000,
+    frameRate: Number(panel.querySelector("[data-input='capture-fps']")?.value) || DEFAULTS.capture.frameRate,
+    includeAudio: Boolean(panel.querySelector("[data-toggle='capture-audio']")?.checked),
+    hidePanelDuringCapture: Boolean(panel.querySelector("[data-toggle='capture-hide-panel']")?.checked)
+  };
+}
+
 function isLikelyRemoteUrl(value) {
   return /^(https?:|blob:|about:)/i.test(String(value || "").trim());
 }
@@ -1986,9 +2356,6 @@ function injectStyles() {
       visibility: hidden !important;
       pointer-events: none !important;
     }
-    .p5em-kiosk .p5em-playlist-frame {
-      pointer-events: none;
-    }
     #p5em-overlay-layer {
       position: fixed;
       left: 50%;
@@ -2028,7 +2395,7 @@ function injectStyles() {
       border: 1px solid rgba(255,255,255,0.18);
       backdrop-filter: blur(14px);
       text-decoration: none;
-      pointer-events: auto;
+      pointer-events: none;
     }
     #p5em-card-overlay .p5em-card-copy {
       display: grid;
@@ -2246,7 +2613,7 @@ function injectStyles() {
       padding: 6px;
       background: rgba(255,255,255,0.9);
       box-shadow: 0 8px 30px rgba(0,0,0,0.28);
-      pointer-events: auto;
+      pointer-events: none;
     }
     #p5em-qr-overlay img {
       display: block;
@@ -2282,6 +2649,15 @@ function injectStyles() {
     #${PANEL_ID}[hidden] {
       display: none;
     }
+    .p5em-capturing #${PANEL_ID} {
+      display: none !important;
+    }
+    .p5em-capturing,
+    .p5em-capturing *,
+    .p5em-capturing iframe,
+    .p5em-capturing canvas {
+      cursor: none !important;
+    }
     .p5em-panel-header {
       display: flex;
       align-items: center;
@@ -2294,6 +2670,11 @@ function injectStyles() {
       font-size: 10px;
       letter-spacing: 0.16em;
       text-transform: uppercase;
+      cursor: move;
+      user-select: none;
+    }
+    .p5em-panel-header button {
+      cursor: pointer;
     }
     .p5em-panel-header button,
     .p5em-panel-actions button,
@@ -2337,6 +2718,8 @@ function injectStyles() {
       min-height: 0;
       display: none;
       flex-direction: column;
+      overflow: auto;
+      padding-right: 2px;
     }
     .p5em-tab-panel.is-active {
       display: flex;
@@ -2371,9 +2754,13 @@ function injectStyles() {
     }
     .p5em-panel-grid strong {
       max-width: 52%;
+      min-width: 0;
+      overflow: hidden;
       color: rgba(255,255,255,0.92);
       font-weight: 400;
       text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .p5em-panel-actions {
       display: flex;
@@ -2381,6 +2768,7 @@ function injectStyles() {
       gap: 7px;
       margin-top: 10px;
       flex: 0 0 auto;
+      min-height: 0;
     }
     .p5em-panel-controls {
       display: grid;
@@ -2501,6 +2889,27 @@ function injectStyles() {
       display: flex;
       flex-direction: column;
       border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-capture-editor {
+      margin-top: 10px;
+      padding-top: 10px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-capture-status-grid {
+      margin: 0 0 10px;
+      grid-template-columns: 1fr;
+    }
+    .p5em-capture-editor p {
+      margin: 8px 0 0;
+      color: rgba(255,255,255,0.42);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      line-height: 1.35;
+      text-transform: uppercase;
     }
     .p5em-playlist-head {
       display: flex;
@@ -2765,20 +3174,49 @@ function injectStyles() {
     }
     @media (max-width: 560px) {
       #${PANEL_ID} {
-        left: 12px;
-        right: 12px;
-        top: 12px;
-        bottom: 12px;
+        left: 8px;
+        right: 8px;
+        top: 8px;
+        bottom: 8px;
         width: auto;
+        padding: 10px;
+      }
+      #${PANEL_ID}.is-dragging,
+      #${PANEL_ID}[style*="left"] {
+        right: auto;
+        bottom: auto;
+      }
+      .p5em-tabs {
+        gap: 5px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+      .p5em-tabs button {
+        flex: 0 0 auto;
+        padding: 6px 8px;
+        font-size: 8px;
+        letter-spacing: 0.11em;
       }
       .p5em-panel-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 10px;
       }
       .p5em-panel-controls {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .p5em-control-group {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .p5em-copy-field {
+        grid-column: 1 / -1;
+      }
+      .p5em-panel-actions {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        padding-bottom: 2px;
+      }
+      .p5em-panel-actions button {
+        flex: 0 0 auto;
       }
     }
     @media (max-width: 420px) {
@@ -2793,6 +3231,28 @@ function injectStyles() {
     }
   `;
   document.head.appendChild(style);
+}
+
+function injectChildRuntimeStyle(doc) {
+  if (doc.getElementById("p5em-child-runtime-style")) return;
+  const style = doc.createElement("style");
+  style.id = "p5em-child-runtime-style";
+  style.textContent = `
+    .p5em-child-hide-cursor,
+    .p5em-child-hide-cursor *,
+    .p5em-child-hide-cursor canvas {
+      cursor: none !important;
+    }
+    .p5em-child-lock-touch,
+    .p5em-child-lock-touch body,
+    .p5em-child-lock-touch canvas {
+      touch-action: none !important;
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+    }
+  `;
+  doc.head?.appendChild(style);
 }
 
 function average(values) {
@@ -2831,6 +3291,122 @@ function writeRuntimeConfig(storageKey, config) {
   }
 }
 
+function readUrlRuntimeConfig(locationLike = window.location) {
+  const params = new URLSearchParams(locationLike.search || "");
+  if (!Array.from(params.keys()).some((key) => key.startsWith("p5em.") || URL_PARAM_ALIASES.has(key))) return null;
+  const next = {};
+  const playlist = {};
+  const accessibility = {};
+  const watchdog = {};
+
+  assignStringParam(params, next, "title", "title");
+  assignStringParam(params, next, "artist", "artist");
+  assignStringParam(params, next, "year", "year");
+  assignBooleanParam(params, next, "ui", "panel");
+  assignBooleanParam(params, next, "panel", "panel");
+  assignBooleanParam(params, next, "fullscreen", "fullscreen");
+  assignBooleanParam(params, next, "kiosk", "kiosk");
+  assignBooleanParam(params, next, "context", "disableContextMenu");
+  assignBooleanParam(params, next, "touch", "disableTouchGestures");
+  assignBooleanParam(params, next, "scroll", "preventScroll");
+  assignBooleanParam(params, next, "cursor", "hideCursor");
+  assignStringParam(params, next, "cursorMode", "hideCursorMode");
+  assignNumberParam(params, next, "cursorIdle", "cursorIdleMs");
+  assignNumberParam(params, next, "dpr", "maxPixelRatio");
+  assignNumberParam(params, next, "rotation", "rotation");
+  assignBooleanParam(params, next, "refreshOnRotation", "refreshOnRotation");
+  assignBooleanParam(params, next, "showTitle", "showTitleOverlay");
+  assignStringParam(params, next, "titleFont", "titleOverlayFont");
+  assignStringParam(params, next, "titleColor", "titleOverlayColor");
+  assignStringParam(params, next, "titlePosition", "titleOverlayPosition");
+  assignNumberParam(params, next, "titleSize", "titleOverlaySize");
+  assignBooleanParam(params, next, "titleBold", "titleOverlayBold");
+  assignStringParam(params, next, "text", "freeText");
+  assignStringParam(params, next, "freeText", "freeText");
+  assignBooleanParam(params, next, "showText", "showFreeText");
+  assignStringParam(params, next, "textPosition", "freeTextPosition");
+  assignNumberParam(params, next, "textSize", "freeTextSize");
+  assignStringParam(params, next, "layout", "overlayLayout");
+  assignStringParam(params, next, "cardQr", "cardQrPlacement");
+  assignNumberParam(params, next, "safeArea", "overlaySafeArea");
+  assignStringParam(params, next, "qr", "qrLink");
+  assignBooleanParam(params, next, "showQr", "showQr");
+  assignStringParam(params, next, "qrPosition", "qrPosition");
+  assignNumberParam(params, next, "qrSize", "qrSize");
+  assignStringParam(params, next, "seed", "seed");
+  assignBooleanParam(params, next, "monitor", "monitor");
+  assignBooleanParam(params, accessibility, "reducedMotion", "reducedMotion");
+  assignBooleanParam(params, accessibility, "highContrast", "highContrast");
+  assignBooleanParam(params, watchdog, "watchdog", "enabled");
+  assignNumberParam(params, watchdog, "watchdogFps", "minFps");
+  assignNumberParam(params, watchdog, "watchdogSeconds", "seconds");
+  assignBooleanParam(params, watchdog, "watchdogReload", "reload");
+
+  assignBooleanParam(params, playlist, "playlistEnabled", "enabled");
+  assignStringListParam(params, playlist, "urls", "items");
+  assignStringListParam(params, playlist, "playlist", "items");
+  assignNumberParam(params, playlist, "playlistInterval", "intervalValue");
+  assignStringParam(params, playlist, "playlistUnit", "intervalUnit");
+  assignBooleanParam(params, playlist, "randomHash", "randomHash");
+  assignNumberParam(params, playlist, "hashInterval", "hashIntervalValue");
+  assignStringParam(params, playlist, "hashUnit", "hashIntervalUnit");
+  assignStringParam(params, playlist, "hashParam", "hashParam");
+  assignNumberParam(params, playlist, "startIndex", "startIndex");
+
+  if (Object.keys(accessibility).length) next.accessibility = accessibility;
+  if (Object.keys(watchdog).length) next.watchdog = watchdog;
+  if (Object.keys(playlist).length) {
+    if (playlist.intervalValue !== undefined && playlist.intervalUnit) playlist.intervalSeconds = intervalToSeconds(playlist.intervalValue, playlist.intervalUnit);
+    if (playlist.hashIntervalValue !== undefined && playlist.hashIntervalUnit) playlist.hashIntervalSeconds = intervalToSeconds(playlist.hashIntervalValue, playlist.hashIntervalUnit);
+    next.playlist = playlist;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+const URL_PARAM_ALIASES = new Set([
+  "artist", "cardQr", "context", "cursor", "cursorIdle", "cursorMode", "dpr", "freeText", "fullscreen",
+  "hashInterval", "hashParam", "hashUnit", "highContrast", "kiosk", "layout", "monitor", "panel",
+  "playlist", "playlistEnabled", "playlistInterval", "playlistUnit", "qr", "qrPosition", "qrSize",
+  "randomHash", "reducedMotion", "refreshOnRotation", "rotation", "safeArea", "scroll", "seed",
+  "showQr", "showText", "showTitle", "startIndex", "text", "textPosition", "textSize", "title",
+  "titleBold", "titleColor", "titleFont", "titlePosition", "titleSize", "touch", "ui", "urls",
+  "watchdog", "watchdogFps", "watchdogReload", "watchdogSeconds", "year"
+]);
+
+function paramValue(params, name) {
+  return params.get(name) ?? params.get(`p5em.${name}`);
+}
+
+function assignStringParam(params, target, name, key) {
+  const value = paramValue(params, name);
+  if (value !== null) target[key] = value;
+}
+
+function assignNumberParam(params, target, name, key) {
+  const value = paramValue(params, name);
+  if (value === null) return;
+  const number = Number(value);
+  if (Number.isFinite(number)) target[key] = number;
+}
+
+function assignBooleanParam(params, target, name, key) {
+  const value = paramValue(params, name);
+  if (value === null) return;
+  target[key] = parseBooleanParam(value);
+}
+
+function assignStringListParam(params, target, name, key) {
+  const value = paramValue(params, name);
+  if (value === null) return;
+  target[key] = value.split(/[|\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function parseBooleanParam(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (["0", "false", "off", "no", "disabled"].includes(text)) return false;
+  return true;
+}
+
 function mergeRuntimeConfig(base, next = {}) {
   const playlist = Array.isArray(next.playlist)
     ? next.playlist
@@ -2842,6 +3418,7 @@ function mergeRuntimeConfig(base, next = {}) {
     watchdog: { ...(base.watchdog || {}), ...(next.watchdog || {}) },
     logging: { ...(base.logging || {}), ...(next.logging || {}) },
     healthCheck: { ...(base.healthCheck || {}), ...(next.healthCheck || {}) },
+    capture: { ...(base.capture || {}), ...(next.capture || {}) },
     localFiles: { ...(base.localFiles || {}), ...(next.localFiles || {}) },
     playlist
   };
@@ -2890,7 +3467,9 @@ function serializeRuntimeConfig(config) {
     watchdog: { ...config.watchdog },
     logging: { ...config.logging },
     healthCheck: { ...config.healthCheck },
+    capture: { ...config.capture },
     localFiles: { ...config.localFiles },
+    urlParams: config.urlParams,
     playlist: Array.isArray(config.playlist) ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist } : { ...config.playlist },
     persist: config.persist,
     storageKey: config.storageKey
@@ -3034,6 +3613,50 @@ function formatLogArg(value) {
 
 function safeName(name) {
   return String(name || "artwork").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function resolveCaptureMimeType(codec = "auto") {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return "";
+  const candidates = captureMimeCandidates(codec);
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
+}
+
+function captureMimeCandidates(codec = "auto") {
+  const h264 = [
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=h264",
+    "video/mp4"
+  ];
+  const vp9 = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp9,opus"
+  ];
+  const vp8 = [
+    "video/webm;codecs=vp8",
+    "video/webm;codecs=vp8,opus"
+  ];
+  const webm = ["video/webm"];
+  if (codec === "h264") return h264;
+  if (codec === "vp9") return vp9;
+  if (codec === "vp8") return vp8;
+  if (codec === "webm") return webm;
+  if (codec === "default") return [];
+  return [...h264, ...vp9, ...vp8, ...webm];
+}
+
+function captureFilename(name, mimeType = "video/webm") {
+  const base = safeName(name || DEFAULTS.capture.filename) || DEFAULTS.capture.filename;
+  const extension = /mp4/i.test(mimeType) ? "mp4" : "webm";
+  return base.endsWith(`.${extension}`) ? base : `${base}.${extension}`;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function downloadDataUrl(dataUrl, filename) {

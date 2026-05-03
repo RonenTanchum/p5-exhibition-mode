@@ -18,7 +18,9 @@
   },
   "bin": {
     "p5-exhibition-helper": "./bin/exhibition-helper.mjs",
-    "exhibition-helper": "./bin/exhibition-helper.mjs"
+    "exhibition-helper": "./bin/exhibition-helper.mjs",
+    "p5-exhibition-capture": "./bin/capture-helper.mjs",
+    "exhibition-capture": "./bin/capture-helper.mjs"
   },
   "files": [
     "bin",
@@ -30,7 +32,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check src/index.js && node --check src/sensors.js && node --check bin/exhibition-helper.mjs",
+    "check": "node --check src/index.js && node --check src/sensors.js && node --check bin/exhibition-helper.mjs && node --check bin/capture-helper.mjs",
     "demo": "node bin/exhibition-helper.mjs --root . --port 4177"
   },
   "keywords": [

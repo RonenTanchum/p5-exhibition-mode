@@ -432,6 +432,7 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 - **Runtime tab:** display status, input locks, accessibility controls, rotation, hash recording, watchdog, and system diagnostics.
 - **Overlay tab:** title overlay, QR code, shared safe border, font selection, and optional title + QR card layout.
 - **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
+- **Capture tab:** screen/tab recording for artwork plus overlays, with filename, codec, bitrate, FPS, and audio controls.
 - **Log tab:** recent runtime, browser, WebGL, watchdog, playlist hash changes, and artwork errors from the in-page log buffer.
 - **Actions:** fullscreen, reset, screenshot, apply playlist URLs, save/load JSON, previous URL, and next URL.
 
@@ -439,7 +440,88 @@ The panel is designed to fit within the screen height. Runtime, Overlay, and Pla
 
 The Overlay tab can display title, free text, and QR independently as floating overlays or together as a single exhibition-label card. In Card mode, Title Position places the card on screen, free text always sits below the title, and QR in Card places the QR above, below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
 
+The Capture tab uses `getDisplayMedia` and `MediaRecorder` so it can record iframe playlist artworks and overlays together. Click **Start Recording**, choose the current browser tab or the exhibition window in the browser prompt, and press `Shift + C` to stop without reopening the panel. Capture forces fullscreen, hides the settings panel, and requests cursor-free recording. H.264 MP4 is used when the browser supports it; otherwise the runtime falls back to high-quality WebM. **Browse Folder** uses the File System Access API when available, with browser downloads as the fallback on unsupported browsers.
+
+For ProRes delivery, record in the browser first, then convert with the included FFmpeg helper:
+
+```bash
+p5-exhibition-capture --input exhibition-capture.webm --preset prores
+p5-exhibition-capture --input exhibition-capture.webm --preset h264 --output exhibition-capture.mp4
+```
+
+ProRes is not available from browser-only `MediaRecorder`; the helper creates a `.mov` ProRes 422 HQ-style file using FFmpeg on macOS or Windows.
+
 **Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR settings, playlist URLs, intervals, kiosk locks, accessibility, watchdog, logging, and health check settings. **Load JSON** imports that file back into the runtime and refreshes the panel.
+
+## URL Commands
+
+Runtime settings can be controlled from the page URL. URL commands override saved panel settings for that launch. Every command can be written either directly, such as `?ui=false`, or with a namespaced prefix, such as `?p5em.ui=false`.
+
+Example kiosk launch:
+
+```txt
+http://127.0.0.1:4177/demo/?ui=false&fullscreen=true&kiosk=true&rotation=90&showTitle=true&title=Spring&artist=Phenomena%20Labs&year=2026&layout=card&text=Live%20generative%20study&showQr=true&qr=https%3A%2F%2Fronentanchum.art
+```
+
+Example playlist launch:
+
+```txt
+http://127.0.0.1:4177/demo/?playlistEnabled=true&urls=https%3A%2F%2Fart.phenomenalabs.com%2FClassicalRevival%2Findex.html%7Chttps%3A%2F%2Fart.phenomenalabs.com%2FRococo%2Findex.html&playlistInterval=40&playlistUnit=seconds&randomHash=true&hashInterval=5&hashUnit=seconds
+```
+
+Available URL commands:
+
+| URL command | Values | Runtime setting |
+| --- | --- | --- |
+| `ui` / `panel` | `true`, `false` | Show the runtime panel |
+| `fullscreen` | `true`, `false` | Request fullscreen after user gesture |
+| `kiosk` | `true`, `false` | Enable kiosk shell behavior |
+| `context` | `true`, `false` | Disable context menu |
+| `touch` | `true`, `false` | Disable browser touch gestures |
+| `scroll` | `true`, `false` | Prevent page scrolling |
+| `cursor` | `true`, `false` | Hide cursor over artwork |
+| `cursorMode` | `always`, `idle` | Cursor hide behavior |
+| `cursorIdle` | milliseconds | Idle delay before cursor hides |
+| `dpr` | number | Max device pixel ratio |
+| `rotation` | `0`, `90`, `180`, `270` | Rotate artwork and overlays |
+| `refreshOnRotation` | `true`, `false` | Refresh artwork when rotation changes |
+| `title`, `artist`, `year` | text | Overlay metadata |
+| `showTitle` | `true`, `false` | Show title overlay |
+| `titleFont` | `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, `typewriter` | Title/font family |
+| `titleColor` | `white`, `gray`, `black` | Overlay text color |
+| `titlePosition` | `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right` | Title/card position |
+| `titleSize` | pixels | Title size |
+| `titleBold` | `true`, `false` | Bold title and card text |
+| `text` / `freeText` | text | Free text overlay content |
+| `showText` | `true`, `false` | Show free text |
+| `textPosition` | position value | Free text position |
+| `textSize` | pixels | Free text size |
+| `layout` | `separate`, `card` | Floating overlays or card label |
+| `cardQr` | `below`, `above`, `left`, `right` | QR placement inside card |
+| `safeArea` | pixels | Overlay safe border |
+| `qr` | URL | QR link |
+| `showQr` | `true`, `false` | Show QR code |
+| `qrPosition` | position value | Floating QR position |
+| `qrSize` | pixels | QR size |
+| `seed` | text or number | Runtime seed metadata |
+| `monitor` | `true`, `false` | Enable runtime monitor |
+| `reducedMotion` | `true`, `false` | Reduced motion mode |
+| `highContrast` | `true`, `false` | High contrast mode |
+| `watchdog` | `true`, `false` | Enable watchdog |
+| `watchdogFps` | number | Watchdog minimum FPS |
+| `watchdogSeconds` | seconds | Watchdog trigger duration |
+| `watchdogReload` | `true`, `false` | Reload/reset after watchdog trigger |
+| `playlistEnabled` | `true`, `false` | Enable playlist mode |
+| `urls` / `playlist` | `url1|url2|url3` | Playlist URL list |
+| `playlistInterval` | number | Playlist interval value |
+| `playlistUnit` | `seconds`, `minutes`, `hours` | Playlist interval unit |
+| `randomHash` | `true`, `false` | Append random hash to playlist URLs |
+| `hashInterval` | number | Hash refresh interval value |
+| `hashUnit` | `seconds`, `minutes`, `hours` | Hash refresh interval unit |
+| `hashParam` | text | Hash parameter name, default `hash` |
+| `startIndex` | number | Initial playlist index |
+
+For multiple playlist URLs, separate entries with `|` and URL-encode the full value. The generated artwork hash remains a full 256-bit `0x...` value in the playlist URL.
 
 ## Options
 
@@ -497,6 +579,14 @@ createExhibitionMode({
     url: "",
     intervalSeconds: 60
   },
+  capture: {
+    filename: "exhibition-capture",
+    codec: "auto",
+    videoBitsPerSecond: 30000000,
+    frameRate: 60,
+    includeAudio: false,
+    hidePanelDuringCapture: true
+  },
   playlist: {
     enabled: false,
     items: [],
@@ -513,6 +603,7 @@ createExhibitionMode({
   monitor: true,
   panel: true,
   panelKey: "g",
+  urlParams: true,
   onReset: undefined,
   onScreenshot: undefined,
   onDiagnostics: undefined

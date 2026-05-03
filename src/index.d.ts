@@ -40,7 +40,9 @@ export type ExhibitionModeOptions = {
   watchdog?: ExhibitionWatchdogOptions;
   logging?: ExhibitionLoggingOptions;
   healthCheck?: ExhibitionHealthCheckOptions;
+  capture?: ExhibitionCaptureOptions;
   localFiles?: ExhibitionLocalFilesOptions;
+  urlParams?: boolean;
   playlist?: ExhibitionPlaylistOptions | Array<string | ExhibitionPlaylistItem>;
   persist?: boolean;
   storageKey?: string;
@@ -141,6 +143,15 @@ export type ExhibitionHealthCheckOptions = {
   intervalSeconds?: number;
 };
 
+export type ExhibitionCaptureOptions = {
+  filename?: string;
+  codec?: "auto" | "h264" | "vp9" | "vp8" | "webm" | "default" | string;
+  videoBitsPerSecond?: number;
+  frameRate?: number;
+  includeAudio?: boolean;
+  hidePanelDuringCapture?: boolean;
+};
+
 export type ExhibitionLocalFilesOptions = {
   endpoint?: string;
   absolutePrefix?: string;
@@ -216,6 +227,10 @@ export type ExhibitionDiagnostics = {
   droppedFrames: number;
   logs: ExhibitionLogEntry[];
   logCount: number;
+  captureRecording: boolean;
+  captureStatus: string;
+  captureDurationSeconds: number;
+  captureMimeType: string;
   playlistEnabled: boolean;
   playlistIndex: number;
   playlistCount: number;
@@ -268,6 +283,10 @@ export type ExhibitionMode = {
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
   previewPlaylistUrl: (url: string) => string | null;
   clearLogs: () => ExhibitionMode;
+  startCapture: (options?: ExhibitionCaptureOptions) => Promise<ExhibitionMode>;
+  stopCapture: () => ExhibitionMode;
+  chooseCaptureFolder: () => Promise<ExhibitionMode>;
+  setCaptureOptions: (options: ExhibitionCaptureOptions) => ExhibitionMode;
   getConfig: () => Partial<ExhibitionModeOptions>;
   loadConfig: (config: Partial<ExhibitionModeOptions>) => ExhibitionMode;
   saveConfig: () => Partial<ExhibitionModeOptions>;

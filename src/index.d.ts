@@ -3,10 +3,12 @@ export type ExhibitionModeOptions = {
   artist?: string;
   year?: string | number;
   showTitleOverlay?: boolean;
-  titleOverlayFont?: "mono" | "sans" | "serif";
-  titleOverlayColor?: "white" | "black";
+  titleOverlayFont?: ExhibitionTitleOverlayFont;
+  titleOverlayColor?: "white" | "gray" | "black";
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
+  overlayLayout?: ExhibitionOverlayLayout;
+  overlaySafeArea?: number;
   qrLink?: string;
   showQr?: boolean;
   qrPosition?: ExhibitionOverlayPosition;
@@ -59,11 +61,30 @@ export type ExhibitionArtworkMetadataOptions = {
   artist?: string;
   year?: string | number;
   showTitleOverlay?: boolean;
-  titleOverlayFont?: "mono" | "sans" | "serif";
-  titleOverlayColor?: "white" | "black";
+  titleOverlayFont?: ExhibitionTitleOverlayFont;
+  titleOverlayColor?: "white" | "gray" | "black";
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
+  overlayLayout?: ExhibitionOverlayLayout;
+  overlaySafeArea?: number;
 };
+
+export type ExhibitionOverlayLayout = "separate" | "card";
+
+export type ExhibitionTitleOverlayFont =
+  | "mono"
+  | "sans"
+  | "system"
+  | "serif"
+  | "editorial"
+  | "classic"
+  | "book"
+  | "humanist"
+  | "neo"
+  | "geometric"
+  | "architectural"
+  | "condensed"
+  | "typewriter";
 
 export type ExhibitionOverlayPosition =
   | "top-left"
@@ -79,6 +100,8 @@ export type ExhibitionQrOptions = {
   qrPosition?: ExhibitionOverlayPosition;
   qrSize?: number;
   qrProvider?: string;
+  overlayLayout?: ExhibitionOverlayLayout;
+  overlaySafeArea?: number;
 };
 
 export type ExhibitionAccessibilityOptions = {
@@ -134,10 +157,12 @@ export type ExhibitionDiagnostics = {
   artist: string;
   year: string | number;
   titleOverlayVisible: boolean;
-  titleOverlayFont: "mono" | "sans" | "serif";
-  titleOverlayColor: "white" | "black";
+  titleOverlayFont: ExhibitionTitleOverlayFont;
+  titleOverlayColor: "white" | "gray" | "black";
   titleOverlayPosition: ExhibitionOverlayPosition;
   titleOverlaySize: number;
+  overlayLayout: ExhibitionOverlayLayout;
+  overlaySafeArea: number;
   qrLink: string;
   qrVisible: boolean;
   qrPosition: ExhibitionOverlayPosition;
@@ -196,6 +221,8 @@ export type ExhibitionMode = {
   setHealthCheck: (options: ExhibitionHealthCheckOptions) => ExhibitionMode;
   setArtworkMetadata: (options: ExhibitionArtworkMetadataOptions) => ExhibitionMode;
   setQrOptions: (options: ExhibitionQrOptions) => ExhibitionMode;
+  setOverlaySafeArea: (pixels: number | string) => ExhibitionMode;
+  setOverlayLayout: (layout: ExhibitionOverlayLayout | string) => ExhibitionMode;
   startHashRecording: () => ExhibitionMode;
   stopHashRecording: () => ExhibitionMode;
   clearHashRecording: () => ExhibitionMode;

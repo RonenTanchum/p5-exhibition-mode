@@ -7,6 +7,8 @@ const DEFAULTS = {
   titleOverlayColor: "white",
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
+  overlayLayout: "separate",
+  overlaySafeArea: 18,
   qrLink: "",
   showQr: false,
   qrPosition: "bottom-right",
@@ -114,8 +116,10 @@ export function createExhibitionMode(options = {}) {
     applyAccessibility();
     applyKioskMode();
     applyCursorMode();
+    applyOverlaySafeArea();
     applyTitleOverlay();
     applyQrOverlay();
+    applyOverlayCard();
     setupPlaylist();
 
     if (config.panel) {
@@ -167,6 +171,8 @@ export function createExhibitionMode(options = {}) {
     state.playlistFrame?.remove();
     document.getElementById("p5em-title-overlay")?.remove();
     document.getElementById("p5em-qr-overlay")?.remove();
+    document.getElementById("p5em-card-overlay")?.remove();
+    document.documentElement.style.removeProperty("--p5em-overlay-safe-area");
   }
 
   function reset() {
@@ -222,6 +228,8 @@ export function createExhibitionMode(options = {}) {
       titleOverlayColor: config.titleOverlayColor,
       titleOverlayPosition: config.titleOverlayPosition,
       titleOverlaySize: config.titleOverlaySize,
+      overlayLayout: config.overlayLayout,
+      overlaySafeArea: config.overlaySafeArea,
       qrLink: config.qrLink,
       qrVisible: Boolean(config.showQr),
       qrPosition: config.qrPosition,
@@ -437,10 +445,14 @@ export function createExhibitionMode(options = {}) {
     if ("year" in next) config.year = String(next.year || "");
     if ("showTitleOverlay" in next) config.showTitleOverlay = Boolean(next.showTitleOverlay);
     if ("titleOverlayFont" in next) config.titleOverlayFont = normalizeTitleFont(next.titleOverlayFont);
-    if ("titleOverlayColor" in next) config.titleOverlayColor = next.titleOverlayColor === "black" ? "black" : "white";
+    if ("titleOverlayColor" in next) config.titleOverlayColor = normalizeTitleColor(next.titleOverlayColor);
     if ("titleOverlayPosition" in next) config.titleOverlayPosition = normalizeOverlayPosition(next.titleOverlayPosition);
     if ("titleOverlaySize" in next) config.titleOverlaySize = clamp(Number(next.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48);
+    if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
+    if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
     applyTitleOverlay();
+    applyOverlaySafeArea();
+    applyOverlayCard();
     persistConfig();
     updatePanel();
     return api;
@@ -452,7 +464,30 @@ export function createExhibitionMode(options = {}) {
     if ("qrPosition" in next) config.qrPosition = normalizeOverlayPosition(next.qrPosition);
     if ("qrSize" in next) config.qrSize = clamp(Number(next.qrSize) || DEFAULTS.qrSize, 48, 320);
     if ("qrProvider" in next) config.qrProvider = String(next.qrProvider || DEFAULTS.qrProvider);
+    if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
+    if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
+    applyOverlaySafeArea();
     applyQrOverlay();
+    applyOverlayCard();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setOverlaySafeArea(value) {
+    config.overlaySafeArea = normalizeOverlaySafeArea(value);
+    applyOverlaySafeArea();
+    applyOverlayCard();
+    persistConfig();
+    updatePanel();
+    return api;
+  }
+
+  function setOverlayLayout(value) {
+    config.overlayLayout = normalizeOverlayLayout(value);
+    applyTitleOverlay();
+    applyQrOverlay();
+    applyOverlayCard();
     persistConfig();
     updatePanel();
     return api;
@@ -484,9 +519,13 @@ export function createExhibitionMode(options = {}) {
     document.documentElement.classList.toggle("p5em-high-contrast", Boolean(a.highContrast));
   }
 
+  function applyOverlaySafeArea() {
+    document.documentElement.style.setProperty("--p5em-overlay-safe-area", `${normalizeOverlaySafeArea(config.overlaySafeArea)}px`);
+  }
+
   function applyTitleOverlay() {
     let overlay = document.getElementById("p5em-title-overlay");
-    if (!config.showTitleOverlay) {
+    if (!config.showTitleOverlay || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
       return;
     }
@@ -497,14 +536,14 @@ export function createExhibitionMode(options = {}) {
     }
     overlay.textContent = formatTitleOverlay(config);
     overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
-    overlay.dataset.color = config.titleOverlayColor === "black" ? "black" : "white";
+    overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
     overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
   }
 
   function applyQrOverlay() {
     let overlay = document.getElementById("p5em-qr-overlay");
-    if (!config.showQr || !config.qrLink) {
+    if (!config.showQr || !config.qrLink || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
       return;
     }
@@ -522,6 +561,62 @@ export function createExhibitionMode(options = {}) {
     overlay.style.width = `${size}px`;
     overlay.style.height = `${size}px`;
     overlay.querySelector("img").src = buildQrUrl(config.qrLink, size, config.qrProvider);
+  }
+
+  function applyOverlayCard() {
+    let overlay = document.getElementById("p5em-card-overlay");
+    const showTitle = Boolean(config.showTitleOverlay);
+    const showQr = Boolean(config.showQr && config.qrLink);
+    if (normalizeOverlayLayout(config.overlayLayout) !== "card" || (!showTitle && !showQr)) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement(showQr ? "a" : "div");
+      overlay.id = "p5em-card-overlay";
+      overlay.innerHTML = `
+        <div class="p5em-card-copy">
+          <strong></strong>
+          <span></span>
+        </div>
+        <img alt="QR code">
+      `;
+      document.body.appendChild(overlay);
+    }
+    if (showQr && overlay.tagName !== "A") {
+      const replacement = document.createElement("a");
+      replacement.id = "p5em-card-overlay";
+      replacement.innerHTML = overlay.innerHTML;
+      overlay.replaceWith(replacement);
+      overlay = replacement;
+    }
+    if (!showQr && overlay.tagName === "A") {
+      const replacement = document.createElement("div");
+      replacement.id = "p5em-card-overlay";
+      replacement.innerHTML = overlay.innerHTML;
+      overlay.replaceWith(replacement);
+      overlay = replacement;
+    }
+    if (showQr) {
+      overlay.href = config.qrLink;
+      overlay.target = "_blank";
+      overlay.rel = "noopener noreferrer";
+    }
+    const size = clamp(Number(config.qrSize) || DEFAULTS.qrSize, 48, 320);
+    overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
+    overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
+    overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
+    overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
+    overlay.querySelector("strong").textContent = config.title || "Artwork Title";
+    overlay.querySelector("span").textContent = [config.artist || "Artist Name", config.year].filter(Boolean).join(" · ");
+    const image = overlay.querySelector("img");
+    image.hidden = !showQr;
+    if (showQr) {
+      const cardQrSize = clamp(size, 48, 180);
+      image.style.width = `${cardQrSize}px`;
+      image.style.height = `${cardQrSize}px`;
+      image.src = buildQrUrl(config.qrLink, cardQrSize, config.qrProvider);
+    }
   }
 
   function setupPlaylist() {
@@ -751,8 +846,10 @@ export function createExhibitionMode(options = {}) {
     applyAccessibility();
     applyKioskMode();
     applyCursorMode();
+    applyOverlaySafeArea();
     applyTitleOverlay();
     applyQrOverlay();
+    applyOverlayCard();
     updateInputLockClasses();
     state.playlistEnabled = Boolean(playlistConfig().enabled && playlistItems().length);
     if (playlistItems().length && !state.playlistFrame) ensurePlaylistFrame();
@@ -897,6 +994,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-playlist-hash-interval", formatInterval(d.playlistHashIntervalSeconds));
     setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
     setText("p5em-current-hash", d.currentHash || "None");
+    setText("p5em-current-hash-full", d.currentHash || "None");
     setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 34));
     setText("p5em-hash-recording", d.hashRecording ? "Active" : "Stopped");
     setText("p5em-hash-record-count", String(d.hashRecordCount));
@@ -917,7 +1015,9 @@ export function createExhibitionMode(options = {}) {
     setInputValue("artwork-year", d.year);
     setInputValue("current-hash", d.currentHash);
     setInputValue("qr-link", d.qrLink);
+    setInputValue("overlay-layout", d.overlayLayout);
     setInputValue("title-size", d.titleOverlaySize);
+    setInputValue("overlay-safe-area", d.overlaySafeArea);
     setInputValue("qr-size", d.qrSize);
     setInputValue("title-font", d.titleOverlayFont);
     setInputValue("title-color", d.titleOverlayColor);
@@ -977,6 +1077,8 @@ export function createExhibitionMode(options = {}) {
     setHealthCheck,
     setArtworkMetadata,
     setQrOptions,
+    setOverlaySafeArea,
+    setOverlayLayout,
     startHashRecording,
     stopHashRecording,
     clearHashRecording,
@@ -1014,6 +1116,7 @@ function createPanel(config, api) {
     </div>
     <div class="p5em-tabs" role="tablist" aria-label="Runtime panel sections">
       <button type="button" class="is-active" data-tab="runtime" role="tab" aria-selected="true">Runtime</button>
+      <button type="button" data-tab="overlay" role="tab" aria-selected="false">Overlay</button>
       <button type="button" data-tab="playlist" role="tab" aria-selected="false">Playlist</button>
     </div>
     <div class="p5em-tab-panel is-active" data-panel="runtime" role="tabpanel">
@@ -1027,20 +1130,65 @@ function createPanel(config, api) {
       </div>
       <div class="p5em-panel-controls">
         <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Runtime</h2>
+          ${toggle("context", "Context menu lock")}
+          ${toggle("touch", "Touch gestures lock")}
+          ${toggle("cursor", "Hide cursor")}
+          ${toggle("reduced-motion", "Reduced motion")}
+          ${toggle("high-contrast", "High contrast")}
+          <label class="p5em-number-control">
+            <span>Rotate</span>
+            <select data-input="rotation">
+              <option value="0">0</option>
+              <option value="90">90 CW</option>
+              <option value="270">90 CCW</option>
+              <option value="180">180</option>
+            </select>
+          </label>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Hash Recording</h2>
+          <label class="p5em-text-control">
+            <span>Hash Number</span>
+            <input data-input="current-hash" type="text" value="" readonly>
+          </label>
+          <div class="p5em-copy-field">
+            <span>Current Hash</span>
+            <strong data-p5em="p5em-current-hash-full"></strong>
+            <button type="button" data-action="copy-hash">Copy</button>
+          </div>
+          <div class="p5em-button-row">
+            <button type="button" data-action="hash-record-start">Start</button>
+            <button type="button" data-action="hash-record-stop">Stop</button>
+            <button type="button" data-action="hash-record-export">Export JSON</button>
+            <button type="button" data-action="hash-record-clear">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="p5em-tab-panel" data-panel="overlay" role="tabpanel" hidden>
+      <div class="p5em-overlay-controls">
+        <div class="p5em-control-group p5em-control-group-wide">
           <h2>Title Overlay</h2>
-        <label class="p5em-text-control">
-          <span>Artwork Title</span>
-          <input data-input="artwork-title" type="text" value="${escapeAttr(config.title)}">
-        </label>
-        <label class="p5em-text-control">
-          <span>Artist Name</span>
-          <input data-input="artwork-artist" type="text" value="${escapeAttr(config.artist)}">
-        </label>
-        <label class="p5em-text-control">
-          <span>Year</span>
-          <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
-        </label>
-        ${toggle("title-overlay", "Show title overlay")}
+          <label class="p5em-number-control">
+            <span>Layout</span>
+            <select data-input="overlay-layout">
+              ${overlayLayoutOptions(config.overlayLayout)}
+            </select>
+          </label>
+          <label class="p5em-text-control">
+            <span>Artwork Title</span>
+            <input data-input="artwork-title" type="text" value="${escapeAttr(config.title)}">
+          </label>
+          <label class="p5em-text-control">
+            <span>Artist Name</span>
+            <input data-input="artwork-artist" type="text" value="${escapeAttr(config.artist)}">
+          </label>
+          <label class="p5em-text-control">
+            <span>Year</span>
+            <input data-input="artwork-year" type="text" value="${escapeAttr(config.year)}">
+          </label>
+          ${toggle("title-overlay", "Show title overlay")}
           <label class="p5em-number-control">
             <span>Title Size</span>
             <input data-input="title-size" type="range" min="8" max="48" step="1" value="${config.titleOverlaySize}">
@@ -1048,15 +1196,14 @@ function createPanel(config, api) {
           <label class="p5em-number-control">
             <span>Title Font</span>
             <select data-input="title-font">
-              <option value="mono">Mono</option>
-              <option value="sans">Sans</option>
-              <option value="serif">Serif</option>
+              ${fontOptions(config.titleOverlayFont)}
             </select>
           </label>
           <label class="p5em-number-control">
             <span>Title Color</span>
             <select data-input="title-color">
               <option value="white">White</option>
+              <option value="gray">Gray</option>
               <option value="black">Black</option>
             </select>
           </label>
@@ -1065,6 +1212,13 @@ function createPanel(config, api) {
             <select data-input="title-position">
               ${positionOptions(config.titleOverlayPosition)}
             </select>
+          </label>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
+          <h2>Safe Border</h2>
+          <label class="p5em-number-control p5em-wide-control">
+            <span>Safe Area Size</span>
+            <input data-input="overlay-safe-area" type="range" min="0" max="160" step="2" value="${config.overlaySafeArea}">
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
@@ -1084,36 +1238,6 @@ function createPanel(config, api) {
               ${positionOptions(config.qrPosition)}
             </select>
           </label>
-        </div>
-        <div class="p5em-control-group p5em-control-group-wide">
-          <h2>Hash Recording</h2>
-          <label class="p5em-text-control">
-            <span>Hash Number</span>
-            <input data-input="current-hash" type="text" value="" readonly>
-          </label>
-          <div class="p5em-button-row">
-            <button type="button" data-action="hash-record-start">Start</button>
-            <button type="button" data-action="hash-record-stop">Stop</button>
-            <button type="button" data-action="hash-record-export">Export JSON</button>
-            <button type="button" data-action="hash-record-clear">Clear</button>
-          </div>
-        </div>
-        <div class="p5em-control-group p5em-control-group-wide">
-          <h2>Runtime</h2>
-        ${toggle("context", "Context menu lock")}
-        ${toggle("touch", "Touch gestures lock")}
-        ${toggle("cursor", "Hide cursor")}
-        ${toggle("reduced-motion", "Reduced motion")}
-        ${toggle("high-contrast", "High contrast")}
-        <label class="p5em-number-control">
-          <span>Rotate</span>
-          <select data-input="rotation">
-            <option value="0">0</option>
-            <option value="90">90 CW</option>
-            <option value="270">90 CCW</option>
-            <option value="180">180</option>
-          </select>
-        </label>
         </div>
       </div>
     </div>
@@ -1177,6 +1301,7 @@ function createPanel(config, api) {
     if (action === "reset") api.reset();
     if (action === "screenshot") api.screenshot();
     if (action === "diagnostics") copyDiagnostics(api.diagnostics());
+    if (action === "copy-hash") copyText(api.diagnostics().currentHash || "");
     if (action === "hash-record-start") api.startHashRecording();
     if (action === "hash-record-stop") api.stopHashRecording();
     if (action === "hash-record-export") api.exportHashRecording();
@@ -1245,6 +1370,12 @@ function createPanel(config, api) {
     }
     if (event.target?.dataset?.input === "title-size") {
       api.setArtworkMetadata({ titleOverlaySize: event.target.value });
+    }
+    if (event.target?.dataset?.input === "overlay-layout") {
+      api.setOverlayLayout(event.target.value);
+    }
+    if (event.target?.dataset?.input === "overlay-safe-area") {
+      api.setOverlaySafeArea(event.target.value);
     }
     if (event.target?.dataset?.input === "title-font") {
       api.setArtworkMetadata({ titleOverlayFont: event.target.value });
@@ -1601,54 +1732,161 @@ function injectStyles() {
       font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      text-shadow: 0 1px 14px rgba(0,0,0,0.7);
+      transform-origin: center center;
       pointer-events: none;
     }
-    #p5em-title-overlay[data-font="sans"] {
+    #p5em-card-overlay {
+      position: fixed;
+      z-index: 2147483646;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      max-width: min(520px, calc(100vw - 36px));
+      padding: 14px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(7,7,7,0.72);
+      border: 1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(14px);
+      transform-origin: center center;
+      text-decoration: none;
+      pointer-events: auto;
+    }
+    #p5em-card-overlay .p5em-card-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    #p5em-card-overlay strong {
+      overflow-wrap: anywhere;
+      font: inherit;
+      font-weight: 500;
+    }
+    #p5em-card-overlay span {
+      color: rgba(255,255,255,0.58);
+      font: 400 max(9px, 0.58em)/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #p5em-card-overlay img {
+      display: block;
+      padding: 5px;
+      background: rgba(255,255,255,0.92);
+    }
+    #p5em-title-overlay[data-font="sans"],
+    #p5em-card-overlay[data-font="sans"] {
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    #p5em-title-overlay[data-font="serif"] {
+    #p5em-title-overlay[data-font="serif"],
+    #p5em-card-overlay[data-font="serif"] {
       font-family: Georgia, "Times New Roman", serif;
       letter-spacing: 0.02em;
       text-transform: none;
     }
-    #p5em-title-overlay[data-color="white"] {
-      color: rgba(255,255,255,0.88);
-      text-shadow: 0 1px 14px rgba(0,0,0,0.72);
+    #p5em-title-overlay[data-font="system"],
+    #p5em-card-overlay[data-font="system"] {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0.03em;
     }
-    #p5em-title-overlay[data-color="black"] {
+    #p5em-title-overlay[data-font="condensed"],
+    #p5em-card-overlay[data-font="condensed"] {
+      font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif;
+      letter-spacing: 0.08em;
+    }
+    #p5em-title-overlay[data-font="humanist"],
+    #p5em-card-overlay[data-font="humanist"] {
+      font-family: Avenir, "Avenir Next", Optima, Candara, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-font="editorial"],
+    #p5em-card-overlay[data-font="editorial"] {
+      font-family: "Didot", "Bodoni 72", "Bodoni 72 Oldstyle", Georgia, serif;
+      letter-spacing: 0.02em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-font="classic"],
+    #p5em-card-overlay[data-font="classic"] {
+      font-family: Garamond, "Iowan Old Style", "Times New Roman", serif;
+      letter-spacing: 0.015em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-font="book"],
+    #p5em-card-overlay[data-font="book"] {
+      font-family: "Hoefler Text", "Palatino Linotype", Palatino, Georgia, serif;
+      letter-spacing: 0.01em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-font="neo"],
+    #p5em-card-overlay[data-font="neo"] {
+      font-family: Futura, "Avenir Next", Avenir, "Trebuchet MS", sans-serif;
+      letter-spacing: 0.1em;
+    }
+    #p5em-title-overlay[data-font="geometric"],
+    #p5em-card-overlay[data-font="geometric"] {
+      font-family: "Gill Sans", Futura, "Century Gothic", sans-serif;
+      letter-spacing: 0.08em;
+    }
+    #p5em-title-overlay[data-font="architectural"],
+    #p5em-card-overlay[data-font="architectural"] {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+    }
+    #p5em-title-overlay[data-font="typewriter"],
+    #p5em-card-overlay[data-font="typewriter"] {
+      font-family: "Courier Prime", "Courier New", Courier, monospace;
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+    #p5em-title-overlay[data-color="white"],
+    #p5em-card-overlay[data-color="white"] {
+      color: rgba(255,255,255,0.88);
+    }
+    #p5em-title-overlay[data-color="black"],
+    #p5em-card-overlay[data-color="black"] {
       color: rgba(0,0,0,0.88);
-      text-shadow: 0 1px 14px rgba(255,255,255,0.5);
+      background: rgba(255,255,255,0.72);
+      border-color: rgba(0,0,0,0.16);
+    }
+    #p5em-title-overlay[data-color="gray"],
+    #p5em-card-overlay[data-color="gray"] {
+      color: rgba(150,150,150,0.9);
     }
     #p5em-title-overlay[data-position^="top"],
-    #p5em-qr-overlay[data-position^="top"] {
-      top: 16px;
+    #p5em-qr-overlay[data-position^="top"],
+    #p5em-card-overlay[data-position^="top"] {
+      top: var(--p5em-overlay-safe-area, 18px);
       bottom: auto;
     }
     #p5em-title-overlay[data-position^="bottom"],
-    #p5em-qr-overlay[data-position^="bottom"] {
+    #p5em-qr-overlay[data-position^="bottom"],
+    #p5em-card-overlay[data-position^="bottom"] {
       top: auto;
-      bottom: 16px;
+      bottom: var(--p5em-overlay-safe-area, 18px);
     }
     #p5em-title-overlay[data-position$="left"],
-    #p5em-qr-overlay[data-position$="left"] {
-      left: 18px;
+    #p5em-qr-overlay[data-position$="left"],
+    #p5em-card-overlay[data-position$="left"] {
+      left: var(--p5em-overlay-safe-area, 18px);
       right: auto;
-      transform: none;
+      transform: rotate(var(--p5em-rotation, 0deg));
       text-align: left;
     }
     #p5em-title-overlay[data-position$="center"],
-    #p5em-qr-overlay[data-position$="center"] {
+    #p5em-qr-overlay[data-position$="center"],
+    #p5em-card-overlay[data-position$="center"] {
       left: 50%;
       right: auto;
-      transform: translateX(-50%);
+      transform: translateX(-50%) rotate(var(--p5em-rotation, 0deg));
       text-align: center;
     }
     #p5em-title-overlay[data-position$="right"],
-    #p5em-qr-overlay[data-position$="right"] {
+    #p5em-qr-overlay[data-position$="right"],
+    #p5em-card-overlay[data-position$="right"] {
       left: auto;
-      right: 18px;
-      transform: none;
+      right: var(--p5em-overlay-safe-area, 18px);
+      transform: rotate(var(--p5em-rotation, 0deg));
       text-align: right;
     }
     #p5em-qr-overlay {
@@ -1658,6 +1896,7 @@ function injectStyles() {
       padding: 6px;
       background: rgba(255,255,255,0.9);
       box-shadow: 0 8px 30px rgba(0,0,0,0.28);
+      transform-origin: center center;
       pointer-events: auto;
     }
     #p5em-qr-overlay img {
@@ -1803,6 +2042,17 @@ function injectStyles() {
       flex: 0 0 auto;
       border-top: 1px solid rgba(255,255,255,0.14);
     }
+    .p5em-overlay-controls {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+      border-top: 1px solid rgba(255,255,255,0.14);
+    }
     .p5em-control-group {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1811,6 +2061,9 @@ function injectStyles() {
       border-top: 1px solid rgba(255,255,255,0.12);
     }
     .p5em-control-group-wide {
+      grid-column: 1 / -1;
+    }
+    .p5em-wide-control {
       grid-column: 1 / -1;
     }
     .p5em-control-group h2 {
@@ -1828,6 +2081,30 @@ function injectStyles() {
       flex-wrap: wrap;
       gap: 7px;
     }
+    .p5em-copy-field {
+      grid-column: span 2;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: rgba(255,255,255,0.58);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .p5em-copy-field strong {
+      min-width: 0;
+      overflow: hidden;
+      color: rgba(255,255,255,0.9);
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-transform: none;
+      letter-spacing: 0.02em;
+    }
+    .p5em-copy-field button,
     .p5em-button-row button {
       padding: 7px 8px;
       color: rgba(255,255,255,0.78);
@@ -2058,10 +2335,14 @@ function injectStyles() {
       .p5em-panel-controls {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+      .p5em-control-group {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
     @media (max-width: 420px) {
       .p5em-panel-grid,
-      .p5em-panel-controls {
+      .p5em-panel-controls,
+      .p5em-control-group {
         grid-template-columns: 1fr;
       }
       .p5em-playlist-editor textarea {
@@ -2134,6 +2415,7 @@ function serializeRuntimeConfig(config) {
     titleOverlayColor: config.titleOverlayColor,
     titleOverlayPosition: config.titleOverlayPosition,
     titleOverlaySize: config.titleOverlaySize,
+    overlaySafeArea: config.overlaySafeArea,
     qrLink: config.qrLink,
     showQr: config.showQr,
     qrPosition: config.qrPosition,
@@ -2191,14 +2473,53 @@ function positionOptions(selected = "top-left") {
   ].map(([value, label]) => `<option value="${value}"${normalizeOverlayPosition(selected) === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
+function overlayLayoutOptions(selected = "separate") {
+  return [
+    ["separate", "Separate"],
+    ["card", "Title + QR Card"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeOverlayLayout(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
+function fontOptions(selected = "mono") {
+  return [
+    ["mono", "Mono"],
+    ["sans", "Sans"],
+    ["system", "System"],
+    ["serif", "Serif"],
+    ["editorial", "Editorial Serif"],
+    ["classic", "Classic Serif"],
+    ["book", "Book Serif"],
+    ["humanist", "Humanist"],
+    ["neo", "Neo Grotesk"],
+    ["geometric", "Geometric"],
+    ["architectural", "Architectural"],
+    ["condensed", "Condensed"],
+    ["typewriter", "Typewriter"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeTitleFont(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
 function normalizeOverlayPosition(value) {
   const allowed = new Set(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
   return allowed.has(value) ? value : "top-left";
 }
 
+function normalizeOverlayLayout(value) {
+  return value === "card" ? "card" : "separate";
+}
+
 function normalizeTitleFont(value) {
-  if (value === "sans" || value === "serif") return value;
+  const allowed = new Set(["mono", "sans", "system", "serif", "editorial", "classic", "book", "humanist", "neo", "geometric", "architectural", "condensed", "typewriter"]);
+  if (allowed.has(value)) return value;
   return "mono";
+}
+
+function normalizeTitleColor(value) {
+  if (value === "black" || value === "gray") return value;
+  return "white";
+}
+
+function normalizeOverlaySafeArea(value) {
+  return clamp(Number(value) || 0, 0, 160);
 }
 
 function buildQrUrl(link, size, provider = DEFAULTS.qrProvider) {
@@ -2259,6 +2580,11 @@ async function copyDiagnostics(data) {
   else console.info("p5 Exhibition Mode diagnostics", data);
 }
 
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text).catch(() => {});
+  else console.info("p5 Exhibition Mode", text);
+}
+
 function buildPlaylistUrl(input, playlist) {
   const item = typeof input === "string" ? { url: input } : input;
   let url = item.url || "";
@@ -2305,7 +2631,7 @@ function isTemporaryBlobUrl(value) {
 }
 
 function randomHashValue() {
-  const bytes = new Uint32Array(2);
+  const bytes = new Uint32Array(4);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("");
 }

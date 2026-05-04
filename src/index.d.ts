@@ -8,6 +8,7 @@ export type ExhibitionModeOptions = {
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
   titleOverlayBold?: boolean;
+  titleOverlayItalic?: boolean;
   freeText?: string;
   showFreeText?: boolean;
   freeTextPosition?: ExhibitionOverlayPosition;
@@ -42,6 +43,7 @@ export type ExhibitionModeOptions = {
   healthCheck?: ExhibitionHealthCheckOptions;
   capture?: ExhibitionCaptureOptions;
   localFiles?: ExhibitionLocalFilesOptions;
+  ui?: ExhibitionUiOptions;
   urlParams?: boolean;
   playlist?: ExhibitionPlaylistOptions | Array<string | ExhibitionPlaylistItem>;
   persist?: boolean;
@@ -74,6 +76,7 @@ export type ExhibitionArtworkMetadataOptions = {
   titleOverlayPosition?: ExhibitionOverlayPosition;
   titleOverlaySize?: number;
   titleOverlayBold?: boolean;
+  titleOverlayItalic?: boolean;
   freeText?: string;
   showFreeText?: boolean;
   freeTextPosition?: ExhibitionOverlayPosition;
@@ -145,6 +148,7 @@ export type ExhibitionHealthCheckOptions = {
 
 export type ExhibitionCaptureOptions = {
   filename?: string;
+  source?: "auto" | "canvas" | "screen";
   codec?: "auto" | "h264" | "vp9" | "vp8" | "webm" | "default" | string;
   videoBitsPerSecond?: number;
   frameRate?: number;
@@ -156,6 +160,16 @@ export type ExhibitionLocalFilesOptions = {
   endpoint?: string;
   absolutePrefix?: string;
   fallbackFilePreview?: boolean;
+};
+
+export type ExhibitionUiOptions = {
+  activeTab?: "runtime" | "overlay" | "playlist" | "capture" | "log";
+  panelBounds?: {
+    left?: number;
+    top?: number;
+    width?: number;
+    height?: number;
+  } | null;
 };
 
 export type ExhibitionPlaylistItem = {
@@ -195,6 +209,7 @@ export type ExhibitionDiagnostics = {
   titleOverlayPosition: ExhibitionOverlayPosition;
   titleOverlaySize: number;
   titleOverlayBold: boolean;
+  titleOverlayItalic: boolean;
   freeText: string;
   freeTextVisible: boolean;
   freeTextPosition: ExhibitionOverlayPosition;

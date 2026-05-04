@@ -8,6 +8,7 @@ const DEFAULTS = {
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  titleOverlayItalic: false,
   freeText: "",
   showFreeText: false,
   freeTextPosition: "bottom-left",
@@ -57,6 +58,7 @@ const DEFAULTS = {
   },
   capture: {
     filename: "exhibition-capture",
+    source: "auto",
     codec: "auto",
     videoBitsPerSecond: 30000000,
     frameRate: 60,
@@ -78,6 +80,10 @@ const DEFAULTS = {
     endpoint: "/__p5em/files",
     absolutePrefix: "/__p5em/abs/",
     fallbackFilePreview: true
+  },
+  ui: {
+    activeTab: "runtime",
+    panelBounds: null
   },
   urlParams: true,
   persist: true,
@@ -130,6 +136,12 @@ export function createExhibitionMode(options = {}) {
     captureStartedAt: 0,
     captureStatus: "Idle",
     captureMimeType: "",
+    captureMode: "",
+    captureCanvas: null,
+    captureSourceStream: null,
+    captureSourceVideo: null,
+    captureTrack: null,
+    captureAnimationFrame: null,
     captureDirectoryHandle: null,
     captureDirectoryName: "",
     captureWasPanelOpen: false
@@ -155,7 +167,9 @@ export function createExhibitionMode(options = {}) {
 
     if (config.panel) {
       state.panel = createPanel(config, api);
+      state.panel.__p5emApiConfig = config;
       document.body.appendChild(state.panel);
+      applyPanelUiState();
       updatePanel();
     }
 
@@ -263,6 +277,7 @@ export function createExhibitionMode(options = {}) {
       titleOverlayPosition: config.titleOverlayPosition,
       titleOverlaySize: config.titleOverlaySize,
       titleOverlayBold: Boolean(config.titleOverlayBold),
+      titleOverlayItalic: Boolean(config.titleOverlayItalic),
       freeText: config.freeText,
       freeTextVisible: Boolean(config.showFreeText),
       freeTextPosition: config.freeTextPosition,
@@ -300,6 +315,7 @@ export function createExhibitionMode(options = {}) {
       captureStatus: state.captureStatus,
       captureDurationSeconds: state.captureStartedAt ? Math.round((performance.now() - state.captureStartedAt) / 1000) : 0,
       captureMimeType: state.captureMimeType || "Browser default",
+      captureMode: state.captureMode || normalizeCaptureSource(captureConfig().source),
       captureOutput: state.captureDirectoryName || "Browser downloads",
       playlistEnabled: Boolean(state.playlistEnabled),
       playlistIndex: state.playlistIndex,
@@ -514,8 +530,9 @@ export function createExhibitionMode(options = {}) {
     if ("titleOverlayFont" in next) config.titleOverlayFont = normalizeTitleFont(next.titleOverlayFont);
     if ("titleOverlayColor" in next) config.titleOverlayColor = normalizeTitleColor(next.titleOverlayColor);
     if ("titleOverlayPosition" in next) config.titleOverlayPosition = normalizeOverlayPosition(next.titleOverlayPosition);
-    if ("titleOverlaySize" in next) config.titleOverlaySize = clamp(Number(next.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48);
+    if ("titleOverlaySize" in next) config.titleOverlaySize = normalizeTitleOverlaySize(next.titleOverlaySize);
     if ("titleOverlayBold" in next) config.titleOverlayBold = Boolean(next.titleOverlayBold);
+    if ("titleOverlayItalic" in next) config.titleOverlayItalic = Boolean(next.titleOverlayItalic);
     if ("freeText" in next) config.freeText = String(next.freeText || "");
     if ("showFreeText" in next) config.showFreeText = Boolean(next.showFreeText);
     if ("freeTextPosition" in next) config.freeTextPosition = normalizeOverlayPosition(next.freeTextPosition);
@@ -610,13 +627,17 @@ export function createExhibitionMode(options = {}) {
       overlay.id = "p5em-title-overlay";
       ensureOverlayLayer().appendChild(overlay);
     }
-    overlay.textContent = formatTitleOverlay(config);
+    const parts = formatTitleOverlayParts(config);
+    overlay.innerHTML = `<span class="p5em-title-name"></span><span class="p5em-title-meta"></span>`;
+    overlay.querySelector(".p5em-title-name").textContent = parts.title;
+    overlay.querySelector(".p5em-title-meta").textContent = parts.meta ? ` by ${parts.meta}` : "";
     overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
     overlay.dataset.stackQr = shouldStackSeparateQr() ? "true" : "false";
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
     overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
-    overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
+    overlay.dataset.italic = config.titleOverlayItalic ? "true" : "false";
+    overlay.style.fontSize = `${normalizeTitleOverlaySize(config.titleOverlaySize)}px`;
   }
 
   function applyFreeTextOverlay() {
@@ -708,8 +729,9 @@ export function createExhibitionMode(options = {}) {
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
     overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
+    overlay.dataset.italic = config.titleOverlayItalic ? "true" : "false";
     overlay.dataset.qrPlacement = normalizeCardQrPlacement(config.cardQrPlacement);
-    overlay.style.fontSize = `${clamp(Number(config.titleOverlaySize) || DEFAULTS.titleOverlaySize, 8, 48)}px`;
+    overlay.style.fontSize = `${normalizeTitleOverlaySize(config.titleOverlaySize)}px`;
     const copy = overlay.querySelector(".p5em-card-copy");
     copy.hidden = !showTitle && !showFreeText;
     const title = overlay.querySelector("strong");
@@ -847,6 +869,10 @@ export function createExhibitionMode(options = {}) {
 
   function captureConfig() {
     return { ...DEFAULTS.capture, ...(config.capture || {}) };
+  }
+
+  function uiConfig() {
+    return { ...DEFAULTS.ui, ...(config.ui || {}) };
   }
 
   function playlistItems() {
@@ -1057,6 +1083,7 @@ export function createExhibitionMode(options = {}) {
     if (playlistItems().length && !state.playlistFrame) ensurePlaylistFrame();
     if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
     if (state.playlistEnabled) loadPlaylistItem(playlistConfig().startIndex ?? state.playlistIndex);
+    applyPanelUiState();
     persistConfig();
     syncPlaylistRows(state.panel, playlistItems(), { force: true });
     updatePanel();
@@ -1064,16 +1091,82 @@ export function createExhibitionMode(options = {}) {
   }
 
   function exportConfig() {
+    syncConfigFromPanel();
     const snapshot = getConfig();
     persistConfig();
     downloadJson(snapshot, `${safeName(config.title || "p5-exhibition-mode")}-runtime-config.json`);
     return snapshot;
   }
 
+  function syncConfigFromPanel() {
+    if (!state.panel) return;
+    const activeTab = state.panel.querySelector("[data-tab].is-active")?.dataset?.tab;
+    const panelBounds = getPanelBounds(state.panel);
+    config.title = state.panel.querySelector("[data-input='artwork-title']")?.value ?? config.title;
+    config.artist = state.panel.querySelector("[data-input='artwork-artist']")?.value ?? config.artist;
+    config.year = state.panel.querySelector("[data-input='artwork-year']")?.value ?? config.year;
+    config.freeText = state.panel.querySelector("[data-input='free-text']")?.value ?? config.freeText;
+    config.qrLink = state.panel.querySelector("[data-input='qr-link']")?.value ?? config.qrLink;
+    config.showTitleOverlay = Boolean(state.panel.querySelector("[data-toggle='title-overlay']")?.checked);
+    config.showFreeText = Boolean(state.panel.querySelector("[data-toggle='free-text-overlay']")?.checked);
+    config.showQr = Boolean(state.panel.querySelector("[data-toggle='qr-overlay']")?.checked);
+    config.titleOverlayBold = Boolean(state.panel.querySelector("[data-toggle='title-bold']")?.checked);
+    config.titleOverlayItalic = Boolean(state.panel.querySelector("[data-toggle='title-italic']")?.checked);
+    config.titleOverlaySize = normalizeTitleOverlaySize(state.panel.querySelector("[data-input='title-size']")?.value ?? config.titleOverlaySize);
+    config.freeTextSize = clamp(Number(state.panel.querySelector("[data-input='free-text-size']")?.value ?? config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48);
+    config.qrSize = clamp(Number(state.panel.querySelector("[data-input='qr-size']")?.value ?? config.qrSize) || DEFAULTS.qrSize, 48, 320);
+    config.overlaySafeArea = normalizeOverlaySafeArea(state.panel.querySelector("[data-input='overlay-safe-area']")?.value ?? config.overlaySafeArea);
+    config.overlayLayout = normalizeOverlayLayout(state.panel.querySelector("[data-input='overlay-layout']")?.value ?? config.overlayLayout);
+    config.cardQrPlacement = normalizeCardQrPlacement(state.panel.querySelector("[data-input='card-qr-placement']")?.value ?? config.cardQrPlacement);
+    config.titleOverlayFont = normalizeTitleFont(state.panel.querySelector("[data-input='title-font']")?.value ?? config.titleOverlayFont);
+    config.titleOverlayColor = normalizeTitleColor(state.panel.querySelector("[data-input='title-color']")?.value ?? config.titleOverlayColor);
+    config.titleOverlayPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='title-position']")?.value ?? config.titleOverlayPosition);
+    config.freeTextPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='free-text-position']")?.value ?? config.freeTextPosition);
+    config.qrPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='qr-position']")?.value ?? config.qrPosition);
+    config.rotation = normalizeRotation(state.panel.querySelector("[data-input='rotation']")?.value ?? config.rotation);
+    config.disableContextMenu = Boolean(state.panel.querySelector("[data-toggle='context']")?.checked);
+    config.disableTouchGestures = Boolean(state.panel.querySelector("[data-toggle='touch']")?.checked);
+    config.hideCursor = Boolean(state.panel.querySelector("[data-toggle='cursor']")?.checked);
+    config.accessibility = {
+      ...accessibilityConfig(),
+      reducedMotion: Boolean(state.panel.querySelector("[data-toggle='reduced-motion']")?.checked),
+      highContrast: Boolean(state.panel.querySelector("[data-toggle='high-contrast']")?.checked)
+    };
+    config.ui = {
+      ...uiConfig(),
+      ...(activeTab ? { activeTab } : {}),
+      ...(panelBounds ? { panelBounds } : {})
+    };
+    config.playlist = {
+      ...playlistConfig(),
+      enabled: Boolean(state.panel.querySelector("[data-toggle='playlist']")?.checked),
+      randomHash: Boolean(state.panel.querySelector("[data-toggle='playlist-hash']")?.checked),
+      intervalValue: Number(state.panel.querySelector("[data-input='playlist-interval']")?.value) || playlistConfig().intervalValue,
+      intervalUnit: normalizeIntervalUnit(state.panel.querySelector("[data-input='playlist-interval-unit']")?.value || playlistConfig().intervalUnit),
+      hashIntervalValue: Number(state.panel.querySelector("[data-input='playlist-hash-interval']")?.value) || playlistConfig().hashIntervalValue,
+      hashIntervalUnit: normalizeIntervalUnit(state.panel.querySelector("[data-input='playlist-hash-interval-unit']")?.value || playlistConfig().hashIntervalUnit),
+      items: collectPlaylistRows(state.panel)
+    };
+    config.playlist.intervalSeconds = intervalToSeconds(config.playlist.intervalValue, config.playlist.intervalUnit);
+    config.playlist.hashIntervalSeconds = intervalToSeconds(config.playlist.hashIntervalValue, config.playlist.hashIntervalUnit);
+    config.capture = {
+      ...captureConfig(),
+      ...collectCaptureOptions(state.panel)
+    };
+  }
+
+  function applyPanelUiState() {
+    if (!state.panel) return;
+    const ui = uiConfig();
+    if (ui.activeTab) activatePanelTab(state.panel, ui.activeTab);
+    applyPanelBounds(state.panel, ui.panelBounds);
+  }
+
   function setCaptureOptions(next = {}) {
     config.capture = {
       ...captureConfig(),
       ...next,
+      source: normalizeCaptureSource(next.source ?? captureConfig().source),
       videoBitsPerSecond: Number(next.videoBitsPerSecond ?? captureConfig().videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond,
       frameRate: Number(next.frameRate ?? captureConfig().frameRate) || DEFAULTS.capture.frameRate
     };
@@ -1086,8 +1179,8 @@ export function createExhibitionMode(options = {}) {
     if (state.captureRecorder?.state === "recording") return api;
     setCaptureOptions(next);
     const capture = captureConfig();
-    if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
-      state.captureStatus = "Screen recording is not supported in this browser";
+    if (typeof MediaRecorder === "undefined") {
+      state.captureStatus = "Video recording is not supported in this browser";
       log("error", state.captureStatus);
       updatePanel();
       return api;
@@ -1097,24 +1190,13 @@ export function createExhibitionMode(options = {}) {
       log("warn", `Requested capture codec is not supported by this browser: ${capture.codec}`);
     }
     try {
-      state.captureStatus = "Requesting screen capture";
       state.captureWasPanelOpen = state.panelOpen;
       await enterFullscreen();
       togglePanel(false);
       document.documentElement.classList.add("p5em-capturing", "p5em-hide-cursor");
       state.cursorHidden = true;
       updatePanel();
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          frameRate: Number(capture.frameRate) || DEFAULTS.capture.frameRate,
-          cursor: "never",
-          displaySurface: "browser"
-        },
-        audio: Boolean(capture.includeAudio),
-        preferCurrentTab: true,
-        selfBrowserSurface: "include",
-        surfaceSwitching: "exclude"
-      });
+      const stream = await createCaptureStream(capture);
       const options = {
         videoBitsPerSecond: Number(capture.videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond
       };
@@ -1136,13 +1218,15 @@ export function createExhibitionMode(options = {}) {
         }, { once: true });
       });
       recorder.start(1000);
-      log("info", `Capture started: ${state.captureMimeType || "browser default"}`);
+      log("info", `Capture started: ${state.captureMode || "unknown"} / ${state.captureMimeType || "browser default"}`);
     } catch (error) {
       state.captureStatus = "Capture cancelled or unavailable";
       state.captureRecorder = null;
       state.captureStream = null;
+      stopCanvasCompositor();
       state.captureStartedAt = 0;
-      document.documentElement.classList.remove("p5em-capturing");
+      state.captureMode = "";
+      document.documentElement.classList.remove("p5em-capturing", "p5em-hide-cursor");
       if (!config.hideCursor) showCursor();
       log("warn", state.captureStatus, { message: error?.message || String(error) });
     }
@@ -1153,8 +1237,8 @@ export function createExhibitionMode(options = {}) {
   function stopCapture() {
     if (!state.captureRecorder || state.captureRecorder.state === "inactive") return api;
     state.captureStatus = "Stopping";
+    if (state.captureRecorder.state === "recording") state.captureRecorder.requestData?.();
     state.captureRecorder.stop();
-    state.captureStream?.getTracks().forEach((track) => track.stop());
     updatePanel();
     return api;
   }
@@ -1163,16 +1247,265 @@ export function createExhibitionMode(options = {}) {
     const mimeType = state.captureMimeType || state.captureChunks[0]?.type || "video/webm";
     const blob = new Blob(state.captureChunks, { type: mimeType });
     const filename = captureFilename(captureConfig().filename, mimeType);
-    await saveCaptureBlob(blob, filename);
-    log("info", `Capture saved: ${filename}`, { mimeType, bytes: blob.size });
+    if (blob.size > 0) {
+      await saveCaptureBlob(blob, filename);
+      log("info", `Capture saved: ${filename}`, { mimeType, bytes: blob.size });
+      state.captureStatus = `Saved ${filename}`;
+    } else {
+      log("error", "Capture stopped without video data", { mimeType });
+      state.captureStatus = "No video data captured";
+    }
+    state.captureStream?.getTracks().forEach((track) => track.stop());
     state.captureRecorder = null;
     state.captureStream = null;
+    stopCanvasCompositor();
     state.captureChunks = [];
     state.captureStartedAt = 0;
-    state.captureStatus = `Saved ${filename}`;
-    document.documentElement.classList.remove("p5em-capturing");
+    state.captureMode = "";
+    document.documentElement.classList.remove("p5em-capturing", "p5em-hide-cursor");
     if (!config.hideCursor) showCursor();
     updatePanel();
+  }
+
+  async function createCaptureStream(capture) {
+    const source = normalizeCaptureSource(capture.source);
+    const canvas = findArtworkCanvas();
+    if (source !== "screen" && canvas) {
+      state.captureStatus = "Recording artwork canvas";
+      state.captureMode = "canvas";
+      log("info", "Using direct canvas capture");
+      return createCanvasCompositorStream(canvas, capture);
+    }
+    if (source === "canvas") {
+      throw new Error(state.playlistEnabled
+        ? "No same-origin playlist canvas was found. Remote iframe URLs cannot be captured directly by browser security rules; run the artwork page with Exhibition Mode inside it, or use Screen/Tab capture."
+        : "No capturable artwork canvas was found.");
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      throw new Error("Screen/tab capture is not supported in this browser.");
+    }
+    state.captureStatus = "Requesting screen capture";
+    state.captureMode = "screen";
+    log("info", "Using screen/tab capture fallback");
+    return navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: Number(capture.frameRate) || DEFAULTS.capture.frameRate,
+        cursor: "never",
+        displaySurface: "browser"
+      },
+      audio: Boolean(capture.includeAudio),
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+      surfaceSwitching: "exclude"
+    });
+  }
+
+  async function createCanvasCompositorStream(sourceCanvas, capture) {
+    const dpr = Math.min(window.devicePixelRatio || 1, config.maxPixelRatio || 2);
+    const width = Math.max(2, Math.round(window.innerWidth * dpr));
+    const height = Math.max(2, Math.round(window.innerHeight * dpr));
+    const canvas = document.createElement("canvas");
+    canvas.id = "p5em-capture-canvas";
+    canvas.width = width;
+    canvas.height = height;
+    state.captureCanvas = canvas;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const frameRate = Number(capture.frameRate) || DEFAULTS.capture.frameRate;
+    const sourceStream = sourceCanvas.captureStream(frameRate);
+    const sourceVideo = document.createElement("video");
+    sourceVideo.muted = true;
+    sourceVideo.playsInline = true;
+    sourceVideo.autoplay = true;
+    sourceVideo.style.cssText = "position:fixed;left:-1px;top:-1px;width:1px;height:1px;opacity:0;pointer-events:none;";
+    sourceVideo.srcObject = sourceStream;
+    document.body.appendChild(sourceVideo);
+    await sourceVideo.play().catch(() => {});
+    await waitForVideoFrame(sourceVideo, 1200);
+    state.captureSourceStream = sourceStream;
+    state.captureSourceVideo = sourceVideo;
+    let stream = canvas.captureStream(0);
+    let track = stream.getVideoTracks()[0] || null;
+    if (typeof track?.requestFrame !== "function") {
+      stream.getTracks().forEach((item) => item.stop());
+      stream = canvas.captureStream(frameRate);
+      track = stream.getVideoTracks()[0] || null;
+    }
+    state.captureTrack = track;
+    const draw = () => {
+      drawCaptureFrame(ctx, sourceVideo, width, height, dpr);
+      state.captureTrack?.requestFrame?.();
+      state.captureAnimationFrame = requestAnimationFrame(draw);
+    };
+    draw();
+    log("info", `Canvas compositor running at ${frameRate} FPS target`);
+    return stream;
+  }
+
+  function drawCaptureFrame(ctx, source, width, height, dpr) {
+    const cssWidth = width / dpr;
+    const cssHeight = height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    withRotatedCaptureFrame(ctx, cssWidth, cssHeight, (frameWidth, frameHeight) => {
+      if (source.readyState === undefined || source.readyState >= 2) {
+        ctx.drawImage(source, 0, 0, frameWidth, frameHeight);
+      }
+      drawCaptureOverlays(ctx, frameWidth, frameHeight);
+    });
+  }
+
+  function withRotatedCaptureFrame(ctx, width, height, draw) {
+    const rotation = normalizeRotation(config.rotation);
+    const sideways = rotation === 90 || rotation === 270;
+    const frameWidth = sideways ? height : width;
+    const frameHeight = sideways ? width : height;
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.translate(-frameWidth / 2, -frameHeight / 2);
+    draw(frameWidth, frameHeight);
+    ctx.restore();
+  }
+
+  function drawCaptureOverlays(ctx, frameWidth, frameHeight) {
+    const layout = normalizeOverlayLayout(config.overlayLayout);
+    if (layout === "card") {
+      drawCaptureCard(ctx, frameWidth, frameHeight);
+      return;
+    }
+    if (config.showTitleOverlay) {
+      drawCaptureTitle(ctx, frameWidth, frameHeight);
+    }
+    if (config.showFreeText && config.freeText) {
+      drawCaptureText(ctx, config.freeText, {
+        position: config.freeTextPosition,
+        size: config.freeTextSize,
+        bold: config.titleOverlayBold,
+        maxWidth: Math.min(520, frameWidth * 0.42)
+      }, frameWidth, frameHeight);
+    }
+    if (config.showQr) drawCaptureQr(ctx, frameWidth, frameHeight, config.qrPosition);
+  }
+
+  function drawCaptureCard(ctx, frameWidth, frameHeight) {
+    const showTitle = Boolean(config.showTitleOverlay);
+    const showFreeText = Boolean(config.showFreeText && config.freeText);
+    const showQr = Boolean(config.showQr);
+    if (!showTitle && !showFreeText && !showQr) return;
+    const titleSize = normalizeTitleOverlaySize(config.titleOverlaySize);
+    const freeSize = clamp(Number(config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48);
+    const qrSize = showQr ? clamp(Number(config.qrSize) || DEFAULTS.qrSize, 40, 320) : 0;
+    ctx.save();
+    ctx.font = `${config.titleOverlayItalic ? "italic " : ""}${config.titleOverlayBold ? "700 " : ""}${titleSize}px ${captureFontFamily(config.titleOverlayFont)}`;
+    const title = config.title || "Artwork Title";
+    const meta = [config.artist || "Artist Name", config.year].filter(Boolean).join(" · ");
+    const textWidth = Math.max(ctx.measureText(title).width, ctx.measureText(meta).width, showFreeText ? Math.min(420, frameWidth * 0.36) : 0);
+    const placement = normalizeCardQrPlacement(config.cardQrPlacement);
+    const horizontalQr = showQr && (placement === "left" || placement === "right");
+    const cardWidth = Math.min(frameWidth - 36, Math.max(260, textWidth + 44 + (horizontalQr ? qrSize + 20 : 0)));
+    const textHeight = (showTitle ? titleSize * 2.2 : 0) + (showFreeText ? freeSize * 3.2 : 0);
+    const cardHeight = Math.min(frameHeight - 36, Math.max(120, textHeight + 44 + (!horizontalQr && showQr ? qrSize + 20 : 0)));
+    const [x, y] = capturePosition(normalizeOverlayPosition(config.titleOverlayPosition), cardWidth, cardHeight, frameWidth, frameHeight);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, y, cardWidth, cardHeight);
+    ctx.strokeRect(x, y, cardWidth, cardHeight);
+    const color = captureTextColor(config.titleOverlayColor);
+    ctx.fillStyle = color;
+    let textX = x + 22;
+    let textY = y + 24;
+    if (showQr && placement === "left") textX += qrSize + 20;
+    if (showQr && placement === "above") textY += qrSize + 20;
+    if (showTitle) {
+      ctx.font = `${config.titleOverlayItalic ? "italic " : ""}${config.titleOverlayBold ? "700 " : ""}${titleSize}px ${captureFontFamily(config.titleOverlayFont)}`;
+      ctx.fillText(title, textX, textY + titleSize);
+      ctx.font = `${config.titleOverlayBold ? "700 " : ""}${Math.max(9, titleSize * 0.55)}px ${captureFontFamily(config.titleOverlayFont)}`;
+      ctx.fillText(meta, textX, textY + titleSize * 2);
+      textY += titleSize * 2.2;
+    }
+    if (showFreeText) {
+      ctx.font = `${config.titleOverlayBold ? "700 " : ""}${freeSize}px ${captureFontFamily(config.titleOverlayFont)}`;
+      drawWrappedCaptureText(ctx, config.freeText, textX, textY + freeSize, Math.min(cardWidth - 44, 420), freeSize * 1.35);
+    }
+    if (showQr) {
+      let qrX = x + cardWidth - qrSize - 22;
+      let qrY = y + cardHeight - qrSize - 22;
+      if (placement === "left") qrX = x + 22;
+      if (placement === "above") qrY = y + 22;
+      if (placement === "below") {
+        qrX = x + 22;
+        qrY = y + cardHeight - qrSize - 22;
+      }
+      drawCaptureQr(ctx, frameWidth, frameHeight, config.titleOverlayPosition, qrX, qrY, qrSize);
+    }
+    ctx.restore();
+  }
+
+  function drawCaptureText(ctx, text, options, frameWidth, frameHeight) {
+    if (!text) return;
+    const size = clamp(Number(options.size) || DEFAULTS.titleOverlaySize, 8, 48);
+    const maxWidth = options.maxWidth || Math.min(frameWidth - 36, 720);
+    ctx.save();
+    ctx.font = `${options.bold ? "700 " : ""}${size}px ${captureFontFamily(config.titleOverlayFont)}`;
+    ctx.fillStyle = captureTextColor(config.titleOverlayColor);
+    const lines = wrapCaptureText(ctx, text, maxWidth);
+    const width = Math.min(maxWidth, Math.max(...lines.map((line) => ctx.measureText(line).width), 1));
+    const height = lines.length * size * 1.25;
+    const [x, y] = capturePosition(normalizeOverlayPosition(options.position), width, height, frameWidth, frameHeight);
+    lines.forEach((line, index) => ctx.fillText(line, x, y + size + index * size * 1.25));
+    ctx.restore();
+  }
+
+  function drawCaptureTitle(ctx, frameWidth, frameHeight) {
+    const titleSize = normalizeTitleOverlaySize(config.titleOverlaySize);
+    const parts = formatTitleOverlayParts(config);
+    ctx.save();
+    const titleFont = `${config.titleOverlayItalic ? "italic " : ""}${config.titleOverlayBold ? "700 " : ""}${titleSize}px ${captureFontFamily(config.titleOverlayFont)}`;
+    const metaFont = `${config.titleOverlayBold ? "700 " : ""}${titleSize}px ${captureFontFamily(config.titleOverlayFont)}`;
+    ctx.font = titleFont;
+    const titleWidth = ctx.measureText(parts.title).width;
+    ctx.font = metaFont;
+    const meta = parts.meta ? ` by ${parts.meta}` : "";
+    const metaWidth = ctx.measureText(meta).width;
+    const width = Math.min(frameWidth - 36, titleWidth + metaWidth);
+    const height = titleSize * 1.35;
+    const [x, y] = capturePosition(normalizeOverlayPosition(config.titleOverlayPosition), width, height, frameWidth, frameHeight);
+    ctx.fillStyle = captureTextColor(config.titleOverlayColor);
+    ctx.font = titleFont;
+    ctx.fillText(parts.title, x, y + titleSize);
+    ctx.font = metaFont;
+    ctx.fillText(meta, x + titleWidth, y + titleSize);
+    ctx.restore();
+  }
+
+  function drawCaptureQr(ctx, frameWidth, frameHeight, position, fixedX, fixedY, fixedSize) {
+    const image = document.querySelector("#p5em-qr-overlay img, #p5em-card-overlay img");
+    if (!image || image.hidden || !image.complete || !image.naturalWidth) return;
+    const size = fixedSize || clamp(Number(config.qrSize) || DEFAULTS.qrSize, 40, 320);
+    const [x, y] = fixedX === undefined
+      ? capturePosition(normalizeOverlayPosition(position), size, size, frameWidth, frameHeight)
+      : [fixedX, fixedY];
+    try {
+      ctx.drawImage(image, x, y, size, size);
+    } catch {
+      // Cross-origin QR providers can refuse canvas drawing. The on-screen QR remains visible.
+    }
+  }
+
+  function stopCanvasCompositor() {
+    if (state.captureAnimationFrame) cancelAnimationFrame(state.captureAnimationFrame);
+    state.captureAnimationFrame = null;
+    state.captureSourceStream?.getTracks().forEach((track) => track.stop());
+    if (state.captureSourceVideo) {
+      state.captureSourceVideo.srcObject = null;
+      state.captureSourceVideo.remove();
+    }
+    state.captureSourceStream = null;
+    state.captureSourceVideo = null;
+    state.captureTrack = null;
+    state.captureCanvas = null;
   }
 
   async function chooseCaptureFolder() {
@@ -1393,6 +1726,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-capture-status", d.captureStatus || "Idle");
     setText("p5em-capture-duration", formatDuration(d.captureDurationSeconds || 0));
     setText("p5em-capture-codec", d.captureMimeType || "Browser default");
+    setText("p5em-capture-source", d.captureMode || "auto");
     setText("p5em-capture-output", d.captureOutput || "Browser downloads");
     renderLogRows(state.panel, d.logs);
     setChecked("context", d.contextMenuLocked);
@@ -1422,6 +1756,7 @@ export function createExhibitionMode(options = {}) {
     setInputValue("free-text-position", d.freeTextPosition);
     setInputValue("qr-position", d.qrPosition);
     setChecked("title-bold", d.titleOverlayBold);
+    setChecked("title-italic", d.titleOverlayItalic);
     setChecked("free-text-overlay", d.freeTextVisible);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
@@ -1434,6 +1769,7 @@ export function createExhibitionMode(options = {}) {
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
     setInputValue("capture-filename", captureConfig().filename);
+    setInputValue("capture-source", captureConfig().source);
     setInputValue("capture-codec", captureConfig().codec);
     setInputValue("capture-bitrate", Math.round((Number(captureConfig().videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond) / 1000000));
     setInputValue("capture-fps", captureConfig().frameRate);
@@ -1620,9 +1956,10 @@ function createPanel(config, api) {
           ${toggle("qr-overlay", "Show QR")}
           ${toggle("free-text-overlay", "Show text")}
           ${toggle("title-bold", "Bold title")}
+          ${toggle("title-italic", "Italic title")}
           <label class="p5em-number-control">
             <span>Title Size</span>
-            <input data-input="title-size" type="range" min="8" max="48" step="1" value="${config.titleOverlaySize}">
+            <input data-input="title-size" type="range" min="8" max="96" step="1" value="${config.titleOverlaySize}">
           </label>
           <label class="p5em-number-control">
             <span>Title Font</span>
@@ -1722,13 +2059,19 @@ function createPanel(config, api) {
     <div class="p5em-tab-panel" data-panel="capture" role="tabpanel" hidden>
       <section class="p5em-capture-editor">
         <div class="p5em-panel-grid p5em-capture-status-grid">
-          ${section("Capture", [["Status", "p5em-capture-status"], ["Duration", "p5em-capture-duration"], ["Codec", "p5em-capture-codec"], ["Output", "p5em-capture-output"]])}
+          ${section("Capture", [["Status", "p5em-capture-status"], ["Duration", "p5em-capture-duration"], ["Source", "p5em-capture-source"], ["Codec", "p5em-capture-codec"], ["Output", "p5em-capture-output"]])}
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
           <h2>Recording</h2>
           <label class="p5em-text-control p5em-wide-control">
             <span>Save file name</span>
             <input data-input="capture-filename" type="text" value="${escapeAttr(captureConfigFrom(config).filename)}" placeholder="exhibition-capture">
+          </label>
+          <label class="p5em-number-control">
+            <span>Capture source</span>
+            <select data-input="capture-source">
+              ${captureSourceOptions(captureConfigFrom(config).source)}
+            </select>
           </label>
           <label class="p5em-number-control">
             <span>Codec</span>
@@ -1752,7 +2095,7 @@ function createPanel(config, api) {
             <button type="button" data-action="capture-stop">Stop Recording</button>
           </div>
         </div>
-        <p>Capture forces fullscreen, hides this panel and cursor, and records the artwork plus overlays only. Choose the current tab or exhibition window in the browser prompt. Press Shift + C to stop without reopening the panel.</p>
+        <p>Auto uses direct artwork canvas recording when possible, with no screen-share prompt or browser chrome. Screen/Tab is only needed for iframe playlist URLs and cross-origin artworks. Press Shift + C to stop without reopening the panel.</p>
       </section>
     </div>
     <div class="p5em-tab-panel" data-panel="log" role="tabpanel" hidden>
@@ -1768,7 +2111,6 @@ function createPanel(config, api) {
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
-      <button type="button" data-action="screenshot">Screenshot</button>
       <button type="button" data-action="playlist-apply">Apply URLs</button>
       <button type="button" data-action="playlist-save-json">Save JSON</button>
       <button type="button" data-action="runtime-load-json">Load JSON</button>
@@ -1831,6 +2173,7 @@ function createPanel(config, api) {
     if (toggle === "qr-overlay") api.setQrOptions({ showQr: event.target.checked });
     if (toggle === "free-text-overlay") api.setArtworkMetadata({ showFreeText: event.target.checked });
     if (toggle === "title-bold") api.setArtworkMetadata({ titleOverlayBold: event.target.checked });
+    if (toggle === "title-italic") api.setArtworkMetadata({ titleOverlayItalic: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
     if (toggle === "high-contrast") api.setAccessibility({ highContrast: event.target.checked });
     if (toggle === "playlist") api.togglePlaylist(event.target.checked);
@@ -1933,6 +2276,15 @@ function captureConfigFrom(config) {
   return { ...DEFAULTS.capture, ...(config.capture || {}) };
 }
 
+function captureSourceOptions(selected = "auto") {
+  const normalized = normalizeCaptureSource(selected);
+  return [
+    ["auto", "Auto"],
+    ["canvas", "Artwork Canvas"],
+    ["screen", "Screen / Tab"]
+  ].map(([value, label]) => `<option value="${value}"${value === normalized ? " selected" : ""}>${label}</option>`).join("");
+}
+
 function captureCodecOptions(selected = "auto") {
   const options = [
     ["auto", "Auto"],
@@ -1943,6 +2295,11 @@ function captureCodecOptions(selected = "auto") {
     ["default", "Browser default"]
   ];
   return `${options.map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`).join("")}<option value="prores" disabled>ProRes requires helper</option>`;
+}
+
+function normalizeCaptureSource(value) {
+  if (value === "canvas" || value === "screen") return value;
+  return "auto";
 }
 
 function section(title, rows) {
@@ -1965,6 +2322,9 @@ function toggle(key, label) {
 }
 
 function activatePanelTab(panel, tab) {
+  if (panel.__p5emApiConfig) {
+    panel.__p5emApiConfig.ui = { ...(panel.__p5emApiConfig.ui || {}), activeTab: tab };
+  }
   panel.querySelectorAll("[data-tab]").forEach((button) => {
     const active = button.dataset.tab === tab;
     button.classList.toggle("is-active", active);
@@ -2011,10 +2371,43 @@ function installPanelDrag(panel) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     header.releasePointerCapture?.(event.pointerId);
     panel.classList.remove("is-dragging");
+    if (panel.__p5emApiConfig) {
+      panel.__p5emApiConfig.ui = {
+        ...(panel.__p5emApiConfig.ui || {}),
+        panelBounds: getPanelBounds(panel)
+      };
+    }
     drag = null;
   };
   header.addEventListener("pointerup", endDrag);
   header.addEventListener("pointercancel", endDrag);
+}
+
+function getPanelBounds(panel) {
+  if (!panel) return null;
+  const rect = panel.getBoundingClientRect();
+  const hasCustomPosition = panel.style.left || panel.style.top || panel.style.width || panel.style.height;
+  if (!hasCustomPosition) return null;
+  return {
+    left: Math.round(rect.left),
+    top: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height)
+  };
+}
+
+function applyPanelBounds(panel, bounds) {
+  if (!panel || !bounds) return;
+  const width = clamp(Number(bounds.width) || 0, 260, Math.max(260, window.innerWidth - 16));
+  const height = clamp(Number(bounds.height) || 0, 220, Math.max(220, window.innerHeight - 16));
+  const left = clamp(Number(bounds.left) || 8, 8, Math.max(8, window.innerWidth - width - 8));
+  const top = clamp(Number(bounds.top) || 8, 8, Math.max(8, window.innerHeight - height - 8));
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+  panel.style.width = `${width}px`;
+  panel.style.height = `${height}px`;
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
 }
 
 function renderLogRows(panel, logs = []) {
@@ -2252,6 +2645,7 @@ function collectCaptureOptions(panel) {
   const bitrateMbps = Number(panel.querySelector("[data-input='capture-bitrate']")?.value) || 30;
   return {
     filename: panel.querySelector("[data-input='capture-filename']")?.value || DEFAULTS.capture.filename,
+    source: panel.querySelector("[data-input='capture-source']")?.value || DEFAULTS.capture.source,
     codec: panel.querySelector("[data-input='capture-codec']")?.value || DEFAULTS.capture.codec,
     videoBitsPerSecond: Math.max(1, bitrateMbps) * 1000000,
     frameRate: Number(panel.querySelector("[data-input='capture-fps']")?.value) || DEFAULTS.capture.frameRate,
@@ -2407,11 +2801,19 @@ function injectStyles() {
       font: inherit;
       font-weight: 500;
     }
+    #p5em-title-overlay .p5em-title-name,
+    #p5em-title-overlay .p5em-title-meta {
+      display: inline;
+    }
     #p5em-title-overlay[data-bold="true"],
     #p5em-free-text-overlay[data-bold="true"],
     #p5em-card-overlay[data-bold="true"] strong,
     #p5em-card-overlay[data-bold="true"] p {
       font-weight: 700;
+    }
+    #p5em-title-overlay[data-italic="true"] .p5em-title-name,
+    #p5em-card-overlay[data-italic="true"] strong {
+      font-style: italic;
     }
     #p5em-card-overlay p {
       margin: 0;
@@ -3321,6 +3723,7 @@ function readUrlRuntimeConfig(locationLike = window.location) {
   assignStringParam(params, next, "titlePosition", "titleOverlayPosition");
   assignNumberParam(params, next, "titleSize", "titleOverlaySize");
   assignBooleanParam(params, next, "titleBold", "titleOverlayBold");
+  assignBooleanParam(params, next, "titleItalic", "titleOverlayItalic");
   assignStringParam(params, next, "text", "freeText");
   assignStringParam(params, next, "freeText", "freeText");
   assignBooleanParam(params, next, "showText", "showFreeText");
@@ -3369,7 +3772,7 @@ const URL_PARAM_ALIASES = new Set([
   "playlist", "playlistEnabled", "playlistInterval", "playlistUnit", "qr", "qrPosition", "qrSize",
   "randomHash", "reducedMotion", "refreshOnRotation", "rotation", "safeArea", "scroll", "seed",
   "showQr", "showText", "showTitle", "startIndex", "text", "textPosition", "textSize", "title",
-  "titleBold", "titleColor", "titleFont", "titlePosition", "titleSize", "touch", "ui", "urls",
+  "titleBold", "titleColor", "titleFont", "titleItalic", "titlePosition", "titleSize", "touch", "ui", "urls",
   "watchdog", "watchdogFps", "watchdogReload", "watchdogSeconds", "year"
 ]);
 
@@ -3420,6 +3823,7 @@ function mergeRuntimeConfig(base, next = {}) {
     healthCheck: { ...(base.healthCheck || {}), ...(next.healthCheck || {}) },
     capture: { ...(base.capture || {}), ...(next.capture || {}) },
     localFiles: { ...(base.localFiles || {}), ...(next.localFiles || {}) },
+    ui: { ...(base.ui || {}), ...(next.ui || {}) },
     playlist
   };
 }
@@ -3435,6 +3839,7 @@ function serializeRuntimeConfig(config) {
     titleOverlayPosition: config.titleOverlayPosition,
     titleOverlaySize: config.titleOverlaySize,
     titleOverlayBold: Boolean(config.titleOverlayBold),
+    titleOverlayItalic: Boolean(config.titleOverlayItalic),
     freeText: config.freeText,
     showFreeText: config.showFreeText,
     freeTextPosition: config.freeTextPosition,
@@ -3469,6 +3874,7 @@ function serializeRuntimeConfig(config) {
     healthCheck: { ...config.healthCheck },
     capture: { ...config.capture },
     localFiles: { ...config.localFiles },
+    ui: { ...config.ui },
     urlParams: config.urlParams,
     playlist: Array.isArray(config.playlist) ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist } : { ...config.playlist },
     persist: config.persist,
@@ -3484,10 +3890,15 @@ function accessibilitySnapshot(accessibility = {}) {
 }
 
 function formatTitleOverlay(config) {
+  const parts = formatTitleOverlayParts(config);
+  return parts.meta ? `${parts.title} by ${parts.meta}` : parts.title;
+}
+
+function formatTitleOverlayParts(config) {
   const title = config.title || "Artwork Title";
   const artist = config.artist || "Artist Name";
   const year = config.year ? `, ${config.year}` : "";
-  return `${title} by ${artist}${year}`;
+  return { title, meta: `${artist}${year}` };
 }
 
 function positionOptions(selected = "top-left") {
@@ -3564,11 +3975,117 @@ function normalizeOverlaySafeArea(value) {
   return clamp(Number(value) || 0, 0, 160);
 }
 
+function normalizeTitleOverlaySize(value) {
+  return clamp(Number(value) || DEFAULTS.titleOverlaySize, 8, 96);
+}
+
 function buildQrUrl(link, size, provider = DEFAULTS.qrProvider) {
   const url = new URL(provider);
   url.searchParams.set("size", `${size}x${size}`);
   url.searchParams.set("data", link);
   return url.toString();
+}
+
+function findArtworkCanvas() {
+  const localCanvas = findCanvasInDocument(document);
+  if (localCanvas) return localCanvas;
+  const frame = document.querySelector(".p5em-playlist-frame");
+  if (!frame || frame.hidden) return null;
+  try {
+    return findCanvasInDocument(frame.contentDocument || frame.contentWindow?.document);
+  } catch {
+    return null;
+  }
+}
+
+function findCanvasInDocument(doc) {
+  if (!doc) return null;
+  const canvases = Array.from(doc.querySelectorAll("canvas"));
+  return canvases.find((canvas) => {
+    if (!canvas || canvas.id === "p5em-capture-canvas") return false;
+    if (canvas.closest(`#${PANEL_ID}`)) return false;
+    const rect = canvas.getBoundingClientRect();
+    const style = doc.defaultView?.getComputedStyle(canvas) || window.getComputedStyle(canvas);
+    return rect.width > 2 && rect.height > 2 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  }) || null;
+}
+
+function capturePosition(position, width, height, frameWidth, frameHeight) {
+  const safe = normalizeOverlaySafeArea(DEFAULTS.overlaySafeArea);
+  const configuredSafe = Number(document.documentElement.style.getPropertyValue("--p5em-overlay-safe-area").replace("px", ""));
+  const inset = Number.isFinite(configuredSafe) ? configuredSafe : safe;
+  let x = inset;
+  let y = inset;
+  if (position.endsWith("center")) x = (frameWidth - width) / 2;
+  if (position.endsWith("right")) x = frameWidth - width - inset;
+  if (position.startsWith("bottom")) y = frameHeight - height - inset;
+  return [Math.max(inset, x), Math.max(inset, y)];
+}
+
+function captureTextColor(value) {
+  if (value === "black") return "#050505";
+  if (value === "gray") return "#9c9c9c";
+  return "#f4f4f0";
+}
+
+function captureFontFamily(value) {
+  const font = normalizeTitleFont(value);
+  if (font === "serif") return 'Georgia, "Times New Roman", serif';
+  if (font === "editorial") return 'Didot, "Bodoni 72", "Bodoni MT", Georgia, serif';
+  if (font === "classic") return 'Garamond, "Times New Roman", serif';
+  if (font === "book") return 'Palatino, "Palatino Linotype", "Book Antiqua", serif';
+  if (font === "humanist") return '"Gill Sans", "Avenir Next", Avenir, sans-serif';
+  if (font === "neo") return 'Helvetica, Arial, sans-serif';
+  if (font === "geometric") return 'Futura, "Avenir Next", Avenir, sans-serif';
+  if (font === "architectural") return '"Arial Narrow", "Helvetica Neue", Arial, sans-serif';
+  if (font === "condensed") return '"Arial Narrow", "Roboto Condensed", sans-serif';
+  if (font === "typewriter") return '"Courier Prime", "Courier New", monospace';
+  if (font === "sans" || font === "system") return 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  return '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
+}
+
+function wrapCaptureText(ctx, text, maxWidth) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function drawWrappedCaptureText(ctx, text, x, y, maxWidth, lineHeight) {
+  wrapCaptureText(ctx, text, maxWidth).forEach((line, index) => {
+    ctx.fillText(line, x, y + index * lineHeight);
+  });
+}
+
+function waitForVideoFrame(video, timeoutMs = 1000) {
+  if (!video) return Promise.resolve();
+  if (typeof video.requestVideoFrameCallback === "function") {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      video.requestVideoFrameCallback(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+  if (video.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    video.addEventListener("loadeddata", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
 }
 
 function readUrlHash(url, hashParam = "hash") {
@@ -3641,7 +4158,7 @@ function captureMimeCandidates(codec = "auto") {
   if (codec === "vp8") return vp8;
   if (codec === "webm") return webm;
   if (codec === "default") return [];
-  return [...h264, ...vp9, ...vp8, ...webm];
+  return [...vp9, ...vp8, ...webm, ...h264];
 }
 
 function captureFilename(name, mimeType = "video/webm") {

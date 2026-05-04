@@ -83,6 +83,7 @@ const exhibition = createExhibitionMode({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  titleOverlayItalic: false,
   freeText: "",
   showFreeText: false,
   freeTextPosition: "bottom-left",
@@ -192,6 +193,7 @@ exhibition.setArtworkMetadata({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 16,
   titleOverlayBold: true,
+  titleOverlayItalic: false,
   freeText: "Live generative study",
   showFreeText: true,
   freeTextPosition: "bottom-left",
@@ -221,7 +223,7 @@ Useful methods:
 - `setCursor({ hide, mode, idleMs })`
 - `setRotation(degrees)`
 - `setAccessibility({ reducedMotion, highContrast })`
-- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, freeText, showFreeText, freeTextPosition, freeTextSize, overlayLayout, cardQrPlacement, overlaySafeArea })`
+- `setArtworkMetadata({ title, artist, year, showTitleOverlay, titleOverlayFont, titleOverlayColor, titleOverlayPosition, titleOverlaySize, titleOverlayBold, titleOverlayItalic, freeText, showFreeText, freeTextPosition, freeTextSize, overlayLayout, cardQrPlacement, overlaySafeArea })`
 - `setQrOptions({ qrLink, showQr, qrPosition, qrSize, cardQrPlacement, overlaySafeArea })`
 - `setOverlayLayout("separate" | "card")`
 - `setOverlaySafeArea(pixels)`
@@ -300,7 +302,7 @@ https://example.com/live-generative-work
 
 Browser security note: **Drop HTML** is temporary preview only. Browsers do not expose real filesystem paths to webpages, so dropping or choosing a file cannot fill the saved textbox with `/Users/.../index.html`. For production kiosks, type served local paths such as `./works/work-a/index.html` and run the helper server so those paths resolve.
 
-Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, and cursor mode. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
+Panel settings are persisted to `localStorage` by default using `storageKey: "p5-exhibition-mode-config"`, so a browser refresh keeps the playlist, intervals, rotation, locks, accessibility settings, cursor mode, overlay/card settings, capture settings, and panel UI state. Use **Save JSON** in the panel to download the same runtime configuration as a local `.json` file. Before export, the panel syncs current unsaved field values into the JSON. A webpage cannot silently write files to disk, so the JSON save uses the browser's normal download behavior.
 
 ## Preparing Artworks for `?hash=`
 
@@ -432,7 +434,7 @@ The panel is intentionally quiet and exhibition-facing. It shows:
 - **Runtime tab:** display status, input locks, accessibility controls, rotation, hash recording, watchdog, and system diagnostics.
 - **Overlay tab:** title overlay, QR code, shared safe border, font selection, and optional title + QR card layout.
 - **Playlist tab:** add/remove URL rows, choose URL or local path, preview a row, set playlist and hash intervals, enable random `?hash=`, and move between playlist items.
-- **Capture tab:** screen/tab recording for artwork plus overlays, with filename, codec, bitrate, FPS, and audio controls.
+- **Capture tab:** direct canvas recording or screen/tab fallback for artwork plus overlays, with filename, codec, bitrate, FPS, and audio controls.
 - **Log tab:** recent runtime, browser, WebGL, watchdog, playlist hash changes, and artwork errors from the in-page log buffer.
 - **Actions:** fullscreen, reset, screenshot, apply playlist URLs, save/load JSON, previous URL, and next URL.
 
@@ -440,7 +442,7 @@ The panel is designed to fit within the screen height. Runtime, Overlay, and Pla
 
 The Overlay tab can display title, free text, and QR independently as floating overlays or together as a single exhibition-label card. In Card mode, Title Position places the card on screen, free text always sits below the title, and QR in Card places the QR above, below, left, or right of the title block. Title fonts are dependency-free system stacks: `mono`, `sans`, `system`, `serif`, `editorial`, `classic`, `book`, `humanist`, `neo`, `geometric`, `architectural`, `condensed`, and `typewriter`.
 
-The Capture tab uses `getDisplayMedia` and `MediaRecorder` so it can record iframe playlist artworks and overlays together. Click **Start Recording**, choose the current browser tab or the exhibition window in the browser prompt, and press `Shift + C` to stop without reopening the panel. Capture forces fullscreen, hides the settings panel, and requests cursor-free recording. H.264 MP4 is used when the browser supports it; otherwise the runtime falls back to high-quality WebM. **Browse Folder** uses the File System Access API when available, with browser downloads as the fallback on unsupported browsers.
+The Capture tab defaults to **Auto**. Auto records directly from the artwork canvas with `canvas.captureStream()` when the artwork is running in the current page, so there is no screen-share prompt and no browser chrome in the file. Auto can also capture a playlist iframe when that iframe is same-origin, such as an artwork served by the included local helper. Remote URLs and cross-origin iframes cannot be direct-captured by the parent page because browsers block pixel access across domains. For those, either run Exhibition Mode inside the artwork page itself, or use **Screen / Tab** capture. Capture forces fullscreen, hides the settings panel and cursor, and records the artwork plus overlays only. Press `Shift + C` to stop without reopening the panel. H.264 MP4 is used when the browser supports it; otherwise the runtime falls back to high-quality WebM. **Browse Folder** uses the File System Access API when available, with browser downloads as the fallback on unsupported browsers.
 
 For ProRes delivery, record in the browser first, then convert with the included FFmpeg helper:
 
@@ -451,7 +453,7 @@ p5-exhibition-capture --input exhibition-capture.webm --preset h264 --output exh
 
 ProRes is not available from browser-only `MediaRecorder`; the helper creates a `.mov` ProRes 422 HQ-style file using FFmpeg on macOS or Windows.
 
-**Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR settings, playlist URLs, intervals, kiosk locks, accessibility, watchdog, logging, and health check settings. **Load JSON** imports that file back into the runtime and refreshes the panel.
+**Save JSON** exports the full runtime configuration, including overlay/card layout, safe border, title/QR/free text settings, playlist URLs, intervals, capture source/codec/bitrate/FPS, kiosk locks, accessibility, watchdog, logging, health check settings, active tab, and panel placement. **Load JSON** imports that file back into the runtime and refreshes the panel. Browser-selected folder handles are not included because browsers do not allow them to be restored from JSON without a new user selection.
 
 ## URL Commands
 
@@ -492,6 +494,7 @@ Available URL commands:
 | `titlePosition` | `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right` | Title/card position |
 | `titleSize` | pixels | Title size |
 | `titleBold` | `true`, `false` | Bold title and card text |
+| `titleItalic` | `true`, `false` | Italicize the artwork title only |
 | `text` / `freeText` | text | Free text overlay content |
 | `showText` | `true`, `false` | Show free text |
 | `textPosition` | position value | Free text position |
@@ -536,6 +539,7 @@ createExhibitionMode({
   titleOverlayPosition: "top-left",
   titleOverlaySize: 11,
   titleOverlayBold: false,
+  titleOverlayItalic: false,
   freeText: "",
   showFreeText: false,
   freeTextPosition: "bottom-left",
@@ -581,6 +585,7 @@ createExhibitionMode({
   },
   capture: {
     filename: "exhibition-capture",
+    source: "auto",
     codec: "auto",
     videoBitsPerSecond: 30000000,
     frameRate: 60,
@@ -603,6 +608,10 @@ createExhibitionMode({
   monitor: true,
   panel: true,
   panelKey: "g",
+  ui: {
+    activeTab: "runtime",
+    panelBounds: null
+  },
   urlParams: true,
   onReset: undefined,
   onScreenshot: undefined,

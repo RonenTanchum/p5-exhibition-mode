@@ -28,6 +28,7 @@
     "schemas",
     "templates",
     "examples",
+    "docs",
     "README.md",
     "LICENSE"
   ],

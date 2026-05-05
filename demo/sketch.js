@@ -6,8 +6,18 @@ const exhibition = createExhibitionMode({
   seed: 1842,
   maxPixelRatio: 1.5,
   idleReset: false,
+  capture: {
+    codec: "h264",
+    frameRate: 30
+  },
+  localFiles: {
+    urlMirrorRoot: "/Users/phenomenalabs/Projects/art.phenomenalabs.com"
+  },
+  customUrlParams: [
+    { name: "ui", value: "false" }
+  ],
   playlist: {
-    enabled: false,
+    enabled: true,
     intervalValue: 20,
     intervalUnit: "seconds",
     intervalSeconds: 20,
@@ -17,8 +27,12 @@ const exhibition = createExhibitionMode({
     randomHash: true,
     hashParam: "hash",
     items: [
-      "https://art.phenomenalabs.com/ClassicalRevival/index.html",
-      "https://art.phenomenalabs.com/Rococo/index.html"
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Apex/index.html",
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/EternalTides/index.html",
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html",
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/ClassicalRevival/index.html",
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Rococo/index.html",
+      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Dio/index.html"
     ]
   }
 });

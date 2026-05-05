@@ -24,6 +24,9 @@ const child = spawn(ffmpeg, command, { stdio: "inherit" });
 child.on("error", (error) => {
   console.error(`Failed to run ${ffmpeg}: ${error.message}`);
   console.error("Install FFmpeg first, then run this helper again.");
+  console.error("macOS: brew install ffmpeg");
+  console.error("Official downloads: https://www.ffmpeg.org/download.html");
+  console.error("GitHub mirror: https://github.com/FFmpeg/FFmpeg");
   process.exit(1);
 });
 child.on("exit", (code) => process.exit(code ?? 1));
@@ -86,5 +89,10 @@ Options:
   --output, -o     Output path. Defaults next to input
   --preset         prores or h264
   --bitrate        Optional h264 bitrate, for example 60M
-  --ffmpeg         FFmpeg binary path. Defaults to ffmpeg`);
+  --ffmpeg         FFmpeg binary path. Defaults to ffmpeg
+
+Install FFmpeg:
+  macOS: brew install ffmpeg
+  Official downloads: https://www.ffmpeg.org/download.html
+  GitHub mirror: https://github.com/FFmpeg/FFmpeg`);
 }

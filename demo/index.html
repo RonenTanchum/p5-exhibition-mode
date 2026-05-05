@@ -32,6 +32,15 @@
       animation: demo-note-fade 7s ease forwards;
     }
 
+    .demo-note[data-error="true"] {
+      max-width: 46ch;
+      color: rgba(255,255,255,0.86);
+      animation: none;
+      pointer-events: auto;
+      text-transform: none;
+      letter-spacing: 0.02em;
+    }
+
     @keyframes demo-note-fade {
       0%, 42% {
         opacity: 1;
@@ -45,7 +54,21 @@
 </head>
 <body>
   <div class="demo-note" id="demo-note">Loading demo. Click once for fullscreen. Shift + G opens the runtime panel.</div>
+  <script>
+    if (window.location.protocol === "file:") {
+      const note = document.getElementById("demo-note");
+      note.dataset.error = "true";
+      note.textContent = "This demo must run from a local web server, not file://. In Terminal: cd /Users/phenomenalabs/Projects/p5-exhibition-mode && npm run demo then open http://127.0.0.1:4177/demo/";
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
-  <script type="module" src="./sketch.js"></script>
+  <script>
+    if (window.location.protocol !== "file:") {
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src = "./sketch.js";
+      document.body.appendChild(script);
+    }
+  </script>
 </body>
 </html>

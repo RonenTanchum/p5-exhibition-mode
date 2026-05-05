@@ -33,8 +33,9 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host || `${host}:${port}`}`);
     if (url.pathname === "/__p5em/files") {
-      const files = await listHtmlFiles(root);
-      sendJson(response, { root, files });
+      const listRoot = resolveListRoot(url.searchParams.get("root"));
+      const files = await listHtmlFiles(listRoot);
+      sendJson(response, { root: listRoot, files });
       return;
     }
     if (url.pathname.startsWith(absolutePrefix)) {
@@ -71,9 +72,20 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function resolveListRoot(value) {
+  if (!value) return root;
+  const requested = path.resolve(value);
+  if (!allowedRoots.some((allowedRoot) => isInside(requested, allowedRoot))) {
+    const error = new Error(`Forbidden local root. Start the helper with --allow "${requested}" if this folder should be listed.`);
+    error.statusCode = 403;
+    throw error;
+  }
+  return requested;
+}
+
 async function listHtmlFiles(baseDir) {
   const files = [];
-  await walk(baseDir, files);
+  await walk(baseDir, baseDir, files);
   return files
     .sort((a, b) => a.path.localeCompare(b.path))
     .map((file) => ({
@@ -82,20 +94,21 @@ async function listHtmlFiles(baseDir) {
     }));
 }
 
-async function walk(dir, files) {
+async function walk(dir, baseDir, files) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walk(fullPath, files);
+      await walk(fullPath, baseDir, files);
       continue;
     }
     if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) {
       const stat = await fs.stat(fullPath);
       files.push({
         name: entry.name,
-        path: toPosix(path.relative(root, fullPath)),
+        path: toPosix(path.relative(baseDir, fullPath)),
+        absolutePath: fullPath,
         size: stat.size,
         modifiedAt: stat.mtime.toISOString()
       });

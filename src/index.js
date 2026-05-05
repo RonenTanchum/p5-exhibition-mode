@@ -13,6 +13,11 @@ const DEFAULTS = {
   showFreeText: false,
   freeTextPosition: "bottom-left",
   freeTextSize: 10,
+  showHashOverlay: false,
+  hashOverlayPosition: "bottom-left",
+  hashOverlaySafeArea: 18,
+  hashOverlaySize: 9,
+  hashOverlayColor: "white",
   overlayLayout: "separate",
   cardQrPlacement: "below",
   overlaySafeArea: 18,
@@ -59,17 +64,20 @@ const DEFAULTS = {
   capture: {
     filename: "exhibition-capture",
     source: "auto",
-    codec: "auto",
+    codec: "h264",
     videoBitsPerSecond: 30000000,
     frameRate: 60,
     includeAudio: false,
-    hidePanelDuringCapture: true
+    hidePanelDuringCapture: false
   },
   playlist: {
     enabled: false,
     items: [],
+    itemOrder: "loop",
     intervalSeconds: 120,
     intervalUnit: "seconds",
+    hashes: [],
+    hashOrder: "loop",
     hashIntervalSeconds: 120,
     hashIntervalUnit: "seconds",
     randomHash: false,
@@ -79,12 +87,14 @@ const DEFAULTS = {
   localFiles: {
     endpoint: "/__p5em/files",
     absolutePrefix: "/__p5em/abs/",
+    urlMirrorRoot: "",
     fallbackFilePreview: true
   },
   ui: {
     activeTab: "runtime",
     panelBounds: null
   },
+  customUrlParams: [],
   urlParams: true,
   persist: true,
   storageKey: "p5-exhibition-mode-config",
@@ -115,6 +125,7 @@ export function createExhibitionMode(options = {}) {
     playlistFrame: null,
     playlistEnabled: false,
     playlistIndex: 0,
+    playlistHashIndex: 0,
     playlistLastChangeAt: performance.now(),
     playlistLastHashAt: performance.now(),
     lowFpsSince: null,
@@ -144,7 +155,10 @@ export function createExhibitionMode(options = {}) {
     captureAnimationFrame: null,
     captureDirectoryHandle: null,
     captureDirectoryName: "",
-    captureWasPanelOpen: false
+    captureWasPanelOpen: false,
+    captureLastGoodFrame: null,
+    captureDrawErrorLogged: false,
+    overlayStackFrame: null
   };
 
   function setup() {
@@ -161,6 +175,7 @@ export function createExhibitionMode(options = {}) {
     applyOverlaySafeArea();
     applyTitleOverlay();
     applyFreeTextOverlay();
+    applyHashOverlay();
     applyQrOverlay();
     applyOverlayCard();
     setupPlaylist();
@@ -209,13 +224,17 @@ export function createExhibitionMode(options = {}) {
       target.removeEventListener(type, handler, opts);
     });
     state.listeners = [];
+    if (state.overlayStackFrame) cancelAnimationFrame(state.overlayStackFrame);
+    state.overlayStackFrame = null;
     document.documentElement.classList.remove("p5em-active", "p5em-hide-cursor", "p5em-lock-touch", "p5em-kiosk");
     document.documentElement.classList.remove("p5em-playlist-active");
     document.documentElement.style.removeProperty("--p5em-rotation");
     state.panel?.remove();
     state.playlistFrame?.remove();
+    document.getElementById("p5em-recording-indicator")?.remove();
     document.getElementById("p5em-title-overlay")?.remove();
     document.getElementById("p5em-free-text-overlay")?.remove();
+    document.getElementById("p5em-hash-overlay")?.remove();
     document.getElementById("p5em-qr-overlay")?.remove();
     document.getElementById("p5em-card-overlay")?.remove();
     document.getElementById("p5em-overlay-layer")?.remove();
@@ -239,6 +258,7 @@ export function createExhibitionMode(options = {}) {
     state.panel.hidden = !state.panelOpen;
     updatePanel();
     if (state.panelOpen) syncPlaylistRows(state.panel, playlistItems(), { force: true });
+    if (state.panelOpen) syncPlaylistHashRows(state.panel, playlistHashes(), { force: true });
   }
 
   async function enterFullscreen() {
@@ -282,6 +302,11 @@ export function createExhibitionMode(options = {}) {
       freeTextVisible: Boolean(config.showFreeText),
       freeTextPosition: config.freeTextPosition,
       freeTextSize: config.freeTextSize,
+      hashOverlayVisible: Boolean(config.showHashOverlay),
+      hashOverlayPosition: normalizeHashOverlayPosition(config.hashOverlayPosition),
+      hashOverlaySafeArea: normalizeHashOverlaySafeArea(config.hashOverlaySafeArea),
+      hashOverlaySize: normalizeHashOverlaySize(config.hashOverlaySize),
+      hashOverlayColor: normalizeHashOverlayColor(config.hashOverlayColor),
       overlayLayout: config.overlayLayout,
       cardQrPlacement: config.cardQrPlacement,
       overlaySafeArea: config.overlaySafeArea,
@@ -320,11 +345,14 @@ export function createExhibitionMode(options = {}) {
       playlistEnabled: Boolean(state.playlistEnabled),
       playlistIndex: state.playlistIndex,
       playlistCount: playlistItems().length,
+      playlistHashIndex: state.playlistHashIndex,
+      playlistHashCount: playlistHashes().length,
       playlistIntervalSeconds: playlistIntervalSeconds(),
       playlistIntervalUnit: playlistConfig().intervalUnit,
       playlistHashIntervalSeconds: playlistHashIntervalSeconds(),
       playlistHashIntervalUnit: playlistConfig().hashIntervalUnit,
       playlistRandomHash: Boolean(playlistConfig().randomHash),
+      customUrlParams: normalizeCustomUrlParams(config.customUrlParams),
       reloadCount: state.reloadCount,
       memoryMB: memory
     };
@@ -368,22 +396,26 @@ export function createExhibitionMode(options = {}) {
   }
 
   function installKeyboard() {
-    add(document, "keydown", (event) => {
+    const handleKeydown = (event) => {
       if (event.key.toLowerCase() === "c" && event.shiftKey && state.captureRecorder?.state === "recording") {
         event.preventDefault();
+        event.stopPropagation();
         stopCapture();
         return;
       }
       if (event.key.toLowerCase() === config.panelKey.toLowerCase() && event.shiftKey) {
         event.preventDefault();
-        if (state.captureRecorder?.state === "recording") return;
+        event.stopPropagation();
         togglePanel();
       }
       if (state.panelOpen && event.key === "Escape") togglePanel(false);
-    });
+    };
+    add(document, "keydown", handleKeydown, { capture: true });
+    add(window, "keydown", handleKeydown, { capture: true });
     add(window, "blur", () => {
       if (document.activeElement === state.playlistFrame) setTimeout(reclaimKeyboardFocus, 80);
     });
+    add(window, "resize", scheduleOverlayStacking);
   }
 
   function reclaimKeyboardFocus() {
@@ -537,11 +569,17 @@ export function createExhibitionMode(options = {}) {
     if ("showFreeText" in next) config.showFreeText = Boolean(next.showFreeText);
     if ("freeTextPosition" in next) config.freeTextPosition = normalizeOverlayPosition(next.freeTextPosition);
     if ("freeTextSize" in next) config.freeTextSize = clamp(Number(next.freeTextSize) || DEFAULTS.freeTextSize, 8, 48);
+    if ("showHashOverlay" in next) config.showHashOverlay = Boolean(next.showHashOverlay);
+    if ("hashOverlayPosition" in next) config.hashOverlayPosition = normalizeHashOverlayPosition(next.hashOverlayPosition);
+    if ("hashOverlaySafeArea" in next) config.hashOverlaySafeArea = normalizeHashOverlaySafeArea(next.hashOverlaySafeArea);
+    if ("hashOverlaySize" in next) config.hashOverlaySize = normalizeHashOverlaySize(next.hashOverlaySize);
+    if ("hashOverlayColor" in next) config.hashOverlayColor = normalizeHashOverlayColor(next.hashOverlayColor);
     if ("overlayLayout" in next) config.overlayLayout = normalizeOverlayLayout(next.overlayLayout);
     if ("cardQrPlacement" in next) config.cardQrPlacement = normalizeCardQrPlacement(next.cardQrPlacement);
     if ("overlaySafeArea" in next) config.overlaySafeArea = normalizeOverlaySafeArea(next.overlaySafeArea);
     applyTitleOverlay();
     applyFreeTextOverlay();
+    applyHashOverlay();
     applyOverlaySafeArea();
     applyOverlayCard();
     persistConfig();
@@ -579,6 +617,7 @@ export function createExhibitionMode(options = {}) {
     config.overlayLayout = normalizeOverlayLayout(value);
     applyTitleOverlay();
     applyFreeTextOverlay();
+    applyHashOverlay();
     applyQrOverlay();
     applyOverlayCard();
     persistConfig();
@@ -620,6 +659,7 @@ export function createExhibitionMode(options = {}) {
     let overlay = document.getElementById("p5em-title-overlay");
     if (!config.showTitleOverlay || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
+      scheduleOverlayStacking();
       return;
     }
     if (!overlay) {
@@ -632,18 +672,19 @@ export function createExhibitionMode(options = {}) {
     overlay.querySelector(".p5em-title-name").textContent = parts.title;
     overlay.querySelector(".p5em-title-meta").textContent = parts.meta ? ` by ${parts.meta}` : "";
     overlay.dataset.position = normalizeOverlayPosition(config.titleOverlayPosition);
-    overlay.dataset.stackQr = shouldStackSeparateQr() ? "true" : "false";
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
     overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
     overlay.dataset.italic = config.titleOverlayItalic ? "true" : "false";
     overlay.style.fontSize = `${normalizeTitleOverlaySize(config.titleOverlaySize)}px`;
+    scheduleOverlayStacking();
   }
 
   function applyFreeTextOverlay() {
     let overlay = document.getElementById("p5em-free-text-overlay");
     if (!config.showFreeText || !config.freeText || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
+      scheduleOverlayStacking();
       return;
     }
     if (!overlay) {
@@ -657,12 +698,33 @@ export function createExhibitionMode(options = {}) {
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
     overlay.dataset.bold = config.titleOverlayBold ? "true" : "false";
     overlay.style.fontSize = `${clamp(Number(config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48)}px`;
+    scheduleOverlayStacking();
+  }
+
+  function applyHashOverlay() {
+    let overlay = document.getElementById("p5em-hash-overlay");
+    const hash = currentDisplayHash();
+    if (!config.showHashOverlay || !hash) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "p5em-hash-overlay";
+      ensureOverlayLayer().appendChild(overlay);
+    }
+    overlay.textContent = hash;
+    overlay.dataset.position = normalizeHashOverlayPosition(config.hashOverlayPosition);
+    overlay.dataset.color = normalizeHashOverlayColor(config.hashOverlayColor);
+    overlay.style.fontSize = `${normalizeHashOverlaySize(config.hashOverlaySize)}px`;
+    overlay.style.setProperty("--p5em-hash-safe-area", `${normalizeHashOverlaySafeArea(config.hashOverlaySafeArea)}px`);
   }
 
   function applyQrOverlay() {
     let overlay = document.getElementById("p5em-qr-overlay");
     if (!config.showQr || !config.qrLink || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
+      scheduleOverlayStacking();
       return;
     }
     if (!overlay) {
@@ -676,11 +738,51 @@ export function createExhibitionMode(options = {}) {
     const size = clamp(Number(config.qrSize) || DEFAULTS.qrSize, 48, 320);
     overlay.href = config.qrLink;
     overlay.dataset.position = normalizeOverlayPosition(config.qrPosition);
-    overlay.dataset.stackTitle = shouldStackSeparateQr() ? "true" : "false";
     overlay.style.width = `${size}px`;
     overlay.style.height = `${size}px`;
-    overlay.style.setProperty("--p5em-qr-stack-offset", `${size + 14}px`);
     overlay.querySelector("img").src = buildQrUrl(config.qrLink, size, config.qrProvider);
+    scheduleOverlayStacking();
+  }
+
+  function scheduleOverlayStacking() {
+    if (state.overlayStackFrame) cancelAnimationFrame(state.overlayStackFrame);
+    state.overlayStackFrame = requestAnimationFrame(() => {
+      state.overlayStackFrame = null;
+      applyOverlayStacking();
+    });
+  }
+
+  function applyOverlayStacking() {
+    const entries = [
+      { key: "title", el: document.getElementById("p5em-title-overlay") },
+      { key: "free", el: document.getElementById("p5em-free-text-overlay") },
+      { key: "qr", el: document.getElementById("p5em-qr-overlay") }
+    ].filter(({ el }) => el && el.isConnected);
+
+    entries.forEach(({ el }) => {
+      el.style.setProperty("--p5em-stack-offset", "0px");
+    });
+
+    const groups = new Map();
+    entries.forEach((entry) => {
+      const position = normalizeOverlayPosition(entry.el.dataset.position);
+      if (!groups.has(position)) groups.set(position, []);
+      groups.get(position).push(entry);
+    });
+
+    groups.forEach((group, position) => {
+      const order = position.startsWith("bottom")
+        ? ["qr", "free", "title"]
+        : ["title", "free", "qr"];
+      let offset = 0;
+      order.forEach((key) => {
+        const entry = group.find((item) => item.key === key);
+        if (!entry) return;
+        entry.el.style.setProperty("--p5em-stack-offset", `${offset}px`);
+        const rect = entry.el.getBoundingClientRect();
+        offset += Math.max(0, position.startsWith("bottom") ? rect.height : rect.height) + 14;
+      });
+    });
   }
 
   function applyOverlayCard() {
@@ -764,16 +866,6 @@ export function createExhibitionMode(options = {}) {
     return layer;
   }
 
-  function shouldStackSeparateQr() {
-    return Boolean(
-      config.showTitleOverlay &&
-      config.showQr &&
-      config.qrLink &&
-      normalizeOverlayLayout(config.overlayLayout) === "separate" &&
-      normalizeOverlayPosition(config.titleOverlayPosition) === normalizeOverlayPosition(config.qrPosition)
-    );
-  }
-
   function setupPlaylist() {
     const playlist = playlistConfig();
     state.playlistEnabled = Boolean(playlist.enabled && playlistItems().length);
@@ -829,6 +921,18 @@ export function createExhibitionMode(options = {}) {
         doc.addEventListener("touchmove", (event) => {
           if (config.disableTouchGestures) event.preventDefault();
         }, { passive: false });
+        doc.addEventListener("keydown", (event) => {
+          if (event.key.toLowerCase() === "c" && event.shiftKey && state.captureRecorder?.state === "recording") {
+            event.preventDefault();
+            event.stopPropagation();
+            stopCapture();
+          }
+          if (event.key.toLowerCase() === config.panelKey.toLowerCase() && event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            togglePanel();
+          }
+        }, { capture: true });
         doc.__p5emRuntimeLocksInstalled = true;
       }
     } catch {
@@ -841,14 +945,20 @@ export function createExhibitionMode(options = {}) {
     const interval = playlistIntervalSeconds() * 1000;
     if (now - state.playlistLastChangeAt >= interval) nextPlaylistItem();
     const playlist = playlistConfig();
-    if (playlist.randomHash && now - state.playlistLastHashAt >= playlistHashIntervalSeconds() * 1000) {
-      loadPlaylistItem(state.playlistIndex, { keepUrlTimer: true });
+    if ((playlistHashes().length || playlist.randomHash) && now - state.playlistLastHashAt >= playlistHashIntervalSeconds() * 1000) {
+      nextPlaylistHash();
     }
   }
 
   function playlistConfig() {
-    if (Array.isArray(config.playlist)) return { ...DEFAULTS.playlist, enabled: true, items: config.playlist };
-    return { ...DEFAULTS.playlist, ...(config.playlist || {}) };
+    if (Array.isArray(config.playlist)) return { ...DEFAULTS.playlist, enabled: true, items: normalizePlaylistItems(config.playlist), hashes: [] };
+    const playlist = { ...DEFAULTS.playlist, ...(config.playlist || {}) };
+    playlist.items = normalizePlaylistItems(playlist.items);
+    playlist.hashes = normalizePlaylistHashes(playlist.hashes);
+    playlist.itemOrder = normalizePlaylistOrder(playlist.itemOrder);
+    playlist.hashOrder = normalizePlaylistOrder(playlist.hashOrder);
+    playlist.customUrlParams = normalizeCustomUrlParams(config.customUrlParams);
+    return playlist;
   }
 
   function accessibilityConfig() {
@@ -879,6 +989,10 @@ export function createExhibitionMode(options = {}) {
     return playlistConfig().items.filter(Boolean);
   }
 
+  function playlistHashes() {
+    return playlistConfig().hashes.filter(Boolean);
+  }
+
   function playlistIntervalSeconds() {
     const playlist = playlistConfig();
     if (playlist.intervalUnit) return intervalToSeconds(playlist.intervalValue ?? playlist.intervalSeconds, playlist.intervalUnit);
@@ -899,8 +1013,10 @@ export function createExhibitionMode(options = {}) {
     const now = performance.now();
     if (!options.keepUrlTimer) state.playlistLastChangeAt = now;
     state.playlistLastHashAt = now;
-    const url = buildPlaylistUrl(resolvePlaylistItem(items[state.playlistIndex]), playlistConfig());
-    updateCurrentSource(url, playlistConfig().hashParam || "hash", options.keepUrlTimer ? "hash interval" : "playlist");
+    const playlist = playlistConfig();
+    const hash = options.hash ?? currentPlaylistHash(playlist);
+    const url = buildPlaylistUrl(resolvePlaylistItem(items[state.playlistIndex]), playlist, hash);
+    updateCurrentSource(url, playlist.hashParam || "hash", options.keepUrlTimer ? "hash interval" : "playlist");
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
     document.documentElement.classList.add("p5em-playlist-active");
@@ -912,8 +1028,9 @@ export function createExhibitionMode(options = {}) {
     const cleanUrl = String(url || "").trim();
     if (!cleanUrl) return null;
     ensurePlaylistFrame();
-    const builtUrl = buildPlaylistUrl(resolvePlaylistItem(cleanUrl), playlistConfig());
-    updateCurrentSource(builtUrl, playlistConfig().hashParam || "hash", "preview");
+    const playlist = playlistConfig();
+    const builtUrl = buildPlaylistUrl(resolvePlaylistItem(cleanUrl), playlist, currentPlaylistHash(playlist));
+    updateCurrentSource(builtUrl, playlist.hashParam || "hash", "preview");
     state.playlistFrame.src = builtUrl;
     state.playlistFrame.hidden = false;
     state.playlistLastHashAt = performance.now();
@@ -930,17 +1047,41 @@ export function createExhibitionMode(options = {}) {
 
   function resolveLocalPathUrl(value) {
     const url = String(value || "").trim();
-    if (!isAbsoluteLocalPath(url)) return url;
     const localConfig = { ...DEFAULTS.localFiles, ...(config.localFiles || {}) };
+    if (isLikelyRemoteUrl(url) && localConfig.urlMirrorRoot) {
+      const mirrored = remoteUrlToLocalMirrorPath(url, localConfig.urlMirrorRoot);
+      if (mirrored) return absolutePathToHelperUrl(mirrored, localConfig.absolutePrefix);
+    }
+    if (!isAbsoluteLocalPath(url)) return url;
     return absolutePathToHelperUrl(url, localConfig.absolutePrefix);
   }
 
   function nextPlaylistItem() {
-    return loadPlaylistItem(state.playlistIndex + 1);
+    const count = playlistItems().length;
+    if (!count) return null;
+    return loadPlaylistItem(nextOrderedIndex(state.playlistIndex, count, playlistConfig().itemOrder));
   }
 
   function previousPlaylistItem() {
     return loadPlaylistItem(state.playlistIndex - 1);
+  }
+
+  function nextPlaylistHash() {
+    const hashes = playlistHashes();
+    if (hashes.length) {
+      state.playlistHashIndex = nextOrderedIndex(state.playlistHashIndex, hashes.length, playlistConfig().hashOrder);
+    }
+    return loadPlaylistItem(state.playlistIndex, { keepUrlTimer: true });
+  }
+
+  function currentPlaylistHash(playlist = playlistConfig()) {
+    if (playlist.randomHash) return randomHashValue();
+    const hashes = normalizePlaylistHashes(playlist.hashes);
+    if (hashes.length) {
+      state.playlistHashIndex = ((state.playlistHashIndex % hashes.length) + hashes.length) % hashes.length;
+      return hashes[state.playlistHashIndex];
+    }
+    return "";
   }
 
   function updateCurrentSource(url, hashParam = "hash", reason = "source") {
@@ -948,6 +1089,12 @@ export function createExhibitionMode(options = {}) {
     state.currentHash = readUrlHash(safeUrl(url), hashParam);
     logHashChange(reason);
     recordHashSample(reason);
+    applyHashOverlay();
+  }
+
+  function currentDisplayHash() {
+    return String(state.currentHash || window.__p5emCurrentHash || document.documentElement.dataset.p5emHash || "").trim()
+      || String(window.tokenData?.hash || window.fxhash || "").trim();
   }
 
   function logHashChange(reason = "source") {
@@ -959,6 +1106,7 @@ export function createExhibitionMode(options = {}) {
       playlistIndex: state.playlistIndex,
       reason
     });
+    applyHashOverlay();
   }
 
   function togglePlaylist(force) {
@@ -1015,12 +1163,25 @@ export function createExhibitionMode(options = {}) {
     if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
     persistConfig();
     updatePanel();
+    updateSpecificHashSectionState(state.panel, Boolean(value));
+    return api;
+  }
+
+  function setCustomUrlParams(params) {
+    config.customUrlParams = normalizeCustomUrlParams(params);
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex, { keepUrlTimer: true });
+    persistConfig();
+    updatePanel();
+    syncCustomUrlParamRows(state.panel, config.customUrlParams, { force: true });
     return api;
   }
 
   function setPlaylistOptions(next = {}) {
     const playlist = { ...playlistConfig(), ...next };
     if ("items" in next) playlist.items = normalizePlaylistItems(next.items);
+    if ("hashes" in next) playlist.hashes = normalizePlaylistHashes(next.hashes);
+    if ("itemOrder" in next) playlist.itemOrder = normalizePlaylistOrder(next.itemOrder);
+    if ("hashOrder" in next) playlist.hashOrder = normalizePlaylistOrder(next.hashOrder);
     config.playlist = playlist;
     if (state.playlistFrame) state.playlistFrame.hidden = !Boolean(playlist.enabled);
     state.playlistEnabled = Boolean(playlist.enabled && playlistItems().length);
@@ -1028,6 +1189,7 @@ export function createExhibitionMode(options = {}) {
     persistConfig();
     updatePanel();
     syncPlaylistRows(state.panel, playlist.items, { force: true });
+    syncPlaylistHashRows(state.panel, playlist.hashes, { force: true });
     return api;
   }
 
@@ -1049,6 +1211,92 @@ export function createExhibitionMode(options = {}) {
     syncPlaylistRows(state.panel, normalized, { force: true });
     persistConfig();
     return api;
+  }
+
+  function setPlaylistHashes(hashes) {
+    const normalized = normalizePlaylistHashes(hashes);
+    config.playlist = { ...playlistConfig(), hashes: normalized };
+    state.playlistHashIndex = 0;
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex, { keepUrlTimer: true });
+    updatePanel();
+    syncPlaylistHashRows(state.panel, normalized, { force: true });
+    persistConfig();
+    return api;
+  }
+
+  function restoreDefaultPlaylist() {
+    const savedDefaults = readDefaultPlaylist(config.storageKey);
+    const codeDefaults = Array.isArray(baseConfig.playlist)
+      ? { ...DEFAULTS.playlist, enabled: true, items: baseConfig.playlist }
+      : { ...DEFAULTS.playlist, ...(baseConfig.playlist || {}) };
+    const defaults = savedDefaults || codeDefaults;
+    config.playlist = { ...defaults, items: normalizePlaylistItems(defaults.items || []), hashes: normalizePlaylistHashes(defaults.hashes || []) };
+    state.playlistIndex = Math.max(0, Number(config.playlist.startIndex) || 0);
+    state.playlistHashIndex = Math.max(0, Number(config.playlist.startHashIndex) || 0);
+    state.playlistEnabled = Boolean(config.playlist.enabled && config.playlist.items.length);
+    if (config.playlist.items.length && !state.playlistFrame) ensurePlaylistFrame();
+    if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
+    if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    syncPlaylistRows(state.panel, config.playlist.items, { force: true });
+    syncPlaylistHashRows(state.panel, config.playlist.hashes, { force: true });
+    persistConfig();
+    log("info", savedDefaults ? "Restored saved playlist defaults" : "Restored code playlist defaults");
+    updatePanel();
+    return api;
+  }
+
+  function saveDefaultPlaylist() {
+    syncConfigFromPanel();
+    const playlist = playlistConfig();
+    writeDefaultPlaylist(config.storageKey, playlist);
+    persistConfig();
+    log("info", `Saved ${playlist.items.length} playlist entries as defaults`);
+    updatePanel();
+    return api;
+  }
+
+  async function loadLocalFolderPlaylist(rootPath = "") {
+    const localConfig = { ...DEFAULTS.localFiles, ...(config.localFiles || {}) };
+    const endpoint = new URL(localConfig.endpoint || DEFAULTS.localFiles.endpoint, window.location.href);
+    const listRoot = String(rootPath || localConfig.urlMirrorRoot || "").trim();
+    if (listRoot) endpoint.searchParams.set("root", listRoot);
+
+    let data;
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      data = await response.json();
+    } catch (error) {
+      log("warn", `Served playlist unavailable: ${error?.message || error}`);
+      updatePanel();
+      return api;
+    }
+
+    const items = Array.from(data.files || [])
+      .filter((file) => String(file.name || "").toLowerCase() === "index.html")
+      .map((file) => file.absolutePath || file.path)
+      .filter(Boolean);
+    if (!items.length) {
+      log("warn", `No index.html files found in served root ${data.root || listRoot || "."}`);
+      updatePanel();
+      return api;
+    }
+
+    config.playlist = { ...playlistConfig(), enabled: true, items };
+    state.playlistEnabled = true;
+    state.playlistIndex = 0;
+    if (!state.playlistFrame) ensurePlaylistFrame();
+    loadPlaylistItem(0);
+    syncPlaylistRows(state.panel, items, { force: true });
+    syncPlaylistHashRows(state.panel, playlistHashes(), { force: true });
+    persistConfig();
+    log("info", `Loaded ${items.length} served playlist entries from ${data.root || listRoot || "."}`);
+    updatePanel();
+    return api;
+  }
+
+  async function loadServedPlaylist(rootPath = "") {
+    return loadLocalFolderPlaylist(rootPath);
   }
 
   function persistConfig() {
@@ -1076,6 +1324,7 @@ export function createExhibitionMode(options = {}) {
     applyOverlaySafeArea();
     applyTitleOverlay();
     applyFreeTextOverlay();
+    applyHashOverlay();
     applyQrOverlay();
     applyOverlayCard();
     updateInputLockClasses();
@@ -1086,6 +1335,7 @@ export function createExhibitionMode(options = {}) {
     applyPanelUiState();
     persistConfig();
     syncPlaylistRows(state.panel, playlistItems(), { force: true });
+    syncPlaylistHashRows(state.panel, playlistHashes(), { force: true });
     updatePanel();
     return api;
   }
@@ -1109,11 +1359,15 @@ export function createExhibitionMode(options = {}) {
     config.qrLink = state.panel.querySelector("[data-input='qr-link']")?.value ?? config.qrLink;
     config.showTitleOverlay = Boolean(state.panel.querySelector("[data-toggle='title-overlay']")?.checked);
     config.showFreeText = Boolean(state.panel.querySelector("[data-toggle='free-text-overlay']")?.checked);
+    config.showHashOverlay = Boolean(state.panel.querySelector("[data-toggle='hash-overlay']")?.checked);
     config.showQr = Boolean(state.panel.querySelector("[data-toggle='qr-overlay']")?.checked);
     config.titleOverlayBold = Boolean(state.panel.querySelector("[data-toggle='title-bold']")?.checked);
     config.titleOverlayItalic = Boolean(state.panel.querySelector("[data-toggle='title-italic']")?.checked);
     config.titleOverlaySize = normalizeTitleOverlaySize(state.panel.querySelector("[data-input='title-size']")?.value ?? config.titleOverlaySize);
     config.freeTextSize = clamp(Number(state.panel.querySelector("[data-input='free-text-size']")?.value ?? config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48);
+    config.hashOverlaySize = normalizeHashOverlaySize(state.panel.querySelector("[data-input='hash-overlay-size']")?.value ?? config.hashOverlaySize);
+    config.hashOverlaySafeArea = normalizeHashOverlaySafeArea(state.panel.querySelector("[data-input='hash-overlay-safe-area']")?.value ?? config.hashOverlaySafeArea);
+    config.hashOverlayColor = normalizeHashOverlayColor(state.panel.querySelector("[data-input='hash-overlay-color']")?.value ?? config.hashOverlayColor);
     config.qrSize = clamp(Number(state.panel.querySelector("[data-input='qr-size']")?.value ?? config.qrSize) || DEFAULTS.qrSize, 48, 320);
     config.overlaySafeArea = normalizeOverlaySafeArea(state.panel.querySelector("[data-input='overlay-safe-area']")?.value ?? config.overlaySafeArea);
     config.overlayLayout = normalizeOverlayLayout(state.panel.querySelector("[data-input='overlay-layout']")?.value ?? config.overlayLayout);
@@ -1122,6 +1376,7 @@ export function createExhibitionMode(options = {}) {
     config.titleOverlayColor = normalizeTitleColor(state.panel.querySelector("[data-input='title-color']")?.value ?? config.titleOverlayColor);
     config.titleOverlayPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='title-position']")?.value ?? config.titleOverlayPosition);
     config.freeTextPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='free-text-position']")?.value ?? config.freeTextPosition);
+    config.hashOverlayPosition = normalizeHashOverlayPosition(state.panel.querySelector("[data-input='hash-overlay-position']")?.value ?? config.hashOverlayPosition);
     config.qrPosition = normalizeOverlayPosition(state.panel.querySelector("[data-input='qr-position']")?.value ?? config.qrPosition);
     config.rotation = normalizeRotation(state.panel.querySelector("[data-input='rotation']")?.value ?? config.rotation);
     config.disableContextMenu = Boolean(state.panel.querySelector("[data-toggle='context']")?.checked);
@@ -1137,15 +1392,19 @@ export function createExhibitionMode(options = {}) {
       ...(activeTab ? { activeTab } : {}),
       ...(panelBounds ? { panelBounds } : {})
     };
+    config.customUrlParams = collectCustomUrlParamRows(state.panel);
     config.playlist = {
       ...playlistConfig(),
       enabled: Boolean(state.panel.querySelector("[data-toggle='playlist']")?.checked),
       randomHash: Boolean(state.panel.querySelector("[data-toggle='playlist-hash']")?.checked),
+      itemOrder: normalizePlaylistOrder(state.panel.querySelector("[data-input='playlist-item-order']")?.value),
+      hashOrder: normalizePlaylistOrder(state.panel.querySelector("[data-input='playlist-hash-order']")?.value),
       intervalValue: Number(state.panel.querySelector("[data-input='playlist-interval']")?.value) || playlistConfig().intervalValue,
       intervalUnit: normalizeIntervalUnit(state.panel.querySelector("[data-input='playlist-interval-unit']")?.value || playlistConfig().intervalUnit),
       hashIntervalValue: Number(state.panel.querySelector("[data-input='playlist-hash-interval']")?.value) || playlistConfig().hashIntervalValue,
       hashIntervalUnit: normalizeIntervalUnit(state.panel.querySelector("[data-input='playlist-hash-interval-unit']")?.value || playlistConfig().hashIntervalUnit),
-      items: collectPlaylistRows(state.panel)
+      items: collectPlaylistRows(state.panel),
+      hashes: collectPlaylistHashRows(state.panel)
     };
     config.playlist.intervalSeconds = intervalToSeconds(config.playlist.intervalValue, config.playlist.intervalUnit);
     config.playlist.hashIntervalSeconds = intervalToSeconds(config.playlist.hashIntervalValue, config.playlist.hashIntervalUnit);
@@ -1191,8 +1450,7 @@ export function createExhibitionMode(options = {}) {
     }
     try {
       state.captureWasPanelOpen = state.panelOpen;
-      await enterFullscreen();
-      togglePanel(false);
+      if (capture.hidePanelDuringCapture) togglePanel(false);
       document.documentElement.classList.add("p5em-capturing", "p5em-hide-cursor");
       state.cursorHidden = true;
       updatePanel();
@@ -1201,13 +1459,14 @@ export function createExhibitionMode(options = {}) {
         videoBitsPerSecond: Number(capture.videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond
       };
       if (mimeType) options.mimeType = mimeType;
-      const recorder = new MediaRecorder(stream, options);
+      const recorder = createMediaRecorder(stream, options);
       state.captureRecorder = recorder;
       state.captureStream = stream;
       state.captureChunks = [];
       state.captureStartedAt = performance.now();
       state.captureMimeType = recorder.mimeType || mimeType || "";
       state.captureStatus = "Recording";
+      updateRecordingIndicator(true);
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data?.size) state.captureChunks.push(event.data);
       });
@@ -1220,15 +1479,17 @@ export function createExhibitionMode(options = {}) {
       recorder.start(1000);
       log("info", `Capture started: ${state.captureMode || "unknown"} / ${state.captureMimeType || "browser default"}`);
     } catch (error) {
-      state.captureStatus = "Capture cancelled or unavailable";
+      const message = error?.message || String(error);
+      state.captureStatus = `Capture unavailable: ${shortenMiddle(message, 96)}`;
       state.captureRecorder = null;
       state.captureStream = null;
       stopCanvasCompositor();
       state.captureStartedAt = 0;
       state.captureMode = "";
+      updateRecordingIndicator(false);
       document.documentElement.classList.remove("p5em-capturing", "p5em-hide-cursor");
       if (!config.hideCursor) showCursor();
-      log("warn", state.captureStatus, { message: error?.message || String(error) });
+      log("warn", state.captureStatus, { message });
     }
     updatePanel();
     return api;
@@ -1237,10 +1498,27 @@ export function createExhibitionMode(options = {}) {
   function stopCapture() {
     if (!state.captureRecorder || state.captureRecorder.state === "inactive") return api;
     state.captureStatus = "Stopping";
+    updateRecordingIndicator(true, "Stopping");
     if (state.captureRecorder.state === "recording") state.captureRecorder.requestData?.();
     state.captureRecorder.stop();
     updatePanel();
     return api;
+  }
+
+  function updateRecordingIndicator(visible, label = "Recording") {
+    let indicator = document.getElementById("p5em-recording-indicator");
+    if (!visible) {
+      indicator?.remove();
+      return;
+    }
+    if (!indicator) {
+      indicator = document.createElement("button");
+      indicator.type = "button";
+      indicator.id = "p5em-recording-indicator";
+      indicator.addEventListener("click", () => stopCapture());
+      document.body.appendChild(indicator);
+    }
+    indicator.textContent = label === "Stopping" ? "Stopping..." : "Recording - Stop";
   }
 
   async function finishCapture() {
@@ -1262,42 +1540,48 @@ export function createExhibitionMode(options = {}) {
     state.captureChunks = [];
     state.captureStartedAt = 0;
     state.captureMode = "";
+    state.captureLastGoodFrame = null;
+    state.captureDrawErrorLogged = false;
+    updateRecordingIndicator(false);
     document.documentElement.classList.remove("p5em-capturing", "p5em-hide-cursor");
     if (!config.hideCursor) showCursor();
     updatePanel();
   }
 
   async function createCaptureStream(capture) {
-    const source = normalizeCaptureSource(capture.source);
     const canvas = findArtworkCanvas();
-    if (source !== "screen" && canvas) {
+    if (canvas) {
       state.captureStatus = "Recording artwork canvas";
       state.captureMode = "canvas";
       log("info", "Using direct canvas capture");
-      return createCanvasCompositorStream(canvas, capture);
+      try {
+        return await createCanvasCompositorStream(canvas, capture);
+      } catch (error) {
+        log("warn", "Canvas compositor failed; retrying direct artwork canvas stream", { message: error?.message || String(error) });
+        return createDirectCanvasStream(canvas, capture);
+      }
     }
-    if (source === "canvas") {
-      throw new Error(state.playlistEnabled
-        ? "No same-origin playlist canvas was found. Remote iframe URLs cannot be captured directly by browser security rules; run the artwork page with Exhibition Mode inside it, or use Screen/Tab capture."
-        : "No capturable artwork canvas was found.");
+    throw new Error(captureCanvasUnavailableMessage());
+  }
+
+  function captureCanvasUnavailableMessage() {
+    if (!state.playlistEnabled) return "No capturable artwork canvas was found.";
+    if (isCurrentSourceSameOrigin()) {
+      return "Playlist page is same-origin, but no visible canvas was found inside it. Wait for the artwork to finish loading, then try again.";
     }
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      throw new Error("Screen/tab capture is not supported in this browser.");
-    }
-    state.captureStatus = "Requesting screen capture";
-    state.captureMode = "screen";
-    log("info", "Using screen/tab capture fallback");
-    return navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: Number(capture.frameRate) || DEFAULTS.capture.frameRate,
-        cursor: "never",
-        displaySurface: "browser"
-      },
-      audio: Boolean(capture.includeAudio),
-      preferCurrentTab: true,
-      selfBrowserSurface: "include",
-      surfaceSwitching: "exclude"
-    });
+    return "Remote playlist artworks cannot be direct-captured from the parent page. Browser security blocks reading cross-origin iframe pixels. Open the artwork as the top-level page with Exhibition Mode installed, or serve the artwork locally through the helper.";
+  }
+
+  function isCurrentSourceSameOrigin() {
+    const url = safeUrl(state.playlistFrame?.src || state.currentSource);
+    return Boolean(url && url.origin === window.location.origin);
+  }
+
+  function openCurrentSource() {
+    const url = state.currentSource || state.playlistFrame?.src;
+    if (!url) return api;
+    window.open(url, "_blank", "noopener,noreferrer");
+    return api;
   }
 
   async function createCanvasCompositorStream(sourceCanvas, capture) {
@@ -1309,20 +1593,13 @@ export function createExhibitionMode(options = {}) {
     canvas.width = width;
     canvas.height = height;
     state.captureCanvas = canvas;
+    state.captureLastGoodFrame = document.createElement("canvas");
+    state.captureLastGoodFrame.width = width;
+    state.captureLastGoodFrame.height = height;
     const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) throw new Error("Could not create a 2D capture compositor.");
     const frameRate = Number(capture.frameRate) || DEFAULTS.capture.frameRate;
-    const sourceStream = sourceCanvas.captureStream(frameRate);
-    const sourceVideo = document.createElement("video");
-    sourceVideo.muted = true;
-    sourceVideo.playsInline = true;
-    sourceVideo.autoplay = true;
-    sourceVideo.style.cssText = "position:fixed;left:-1px;top:-1px;width:1px;height:1px;opacity:0;pointer-events:none;";
-    sourceVideo.srcObject = sourceStream;
-    document.body.appendChild(sourceVideo);
-    await sourceVideo.play().catch(() => {});
-    await waitForVideoFrame(sourceVideo, 1200);
-    state.captureSourceStream = sourceStream;
-    state.captureSourceVideo = sourceVideo;
+    if (typeof canvas.captureStream !== "function") throw new Error("Canvas captureStream() is not supported in this browser.");
     let stream = canvas.captureStream(0);
     let track = stream.getVideoTracks()[0] || null;
     if (typeof track?.requestFrame !== "function") {
@@ -1331,8 +1608,17 @@ export function createExhibitionMode(options = {}) {
       track = stream.getVideoTracks()[0] || null;
     }
     state.captureTrack = track;
+    let activeSourceCanvas = sourceCanvas;
     const draw = () => {
-      drawCaptureFrame(ctx, sourceVideo, width, height, dpr);
+      const nextSourceCanvas = findArtworkCanvas();
+      if (nextSourceCanvas && nextSourceCanvas !== activeSourceCanvas) {
+        activeSourceCanvas = nextSourceCanvas;
+        state.captureDrawErrorLogged = false;
+        log("info", "Capture source canvas refreshed");
+      }
+      if (isCapturableCanvas(activeSourceCanvas)) {
+        drawCaptureFrame(ctx, activeSourceCanvas, width, height, dpr);
+      }
       state.captureTrack?.requestFrame?.();
       state.captureAnimationFrame = requestAnimationFrame(draw);
     };
@@ -1341,18 +1627,107 @@ export function createExhibitionMode(options = {}) {
     return stream;
   }
 
+  function createDirectCanvasStream(sourceCanvas, capture) {
+    const frameRate = Number(capture.frameRate) || DEFAULTS.capture.frameRate;
+    if (typeof sourceCanvas.captureStream !== "function") {
+      throw new Error("Artwork canvas captureStream() is not supported in this browser.");
+    }
+    state.captureMode = "canvas-direct";
+    state.captureStatus = "Recording artwork canvas directly";
+    return sourceCanvas.captureStream(frameRate);
+  }
+
+  function createMediaRecorder(stream, options) {
+    try {
+      return new MediaRecorder(stream, options);
+    } catch (error) {
+      if (options.mimeType) {
+        log("warn", `MediaRecorder rejected ${options.mimeType}; retrying browser default`, { message: error?.message || String(error) });
+        return new MediaRecorder(stream, { videoBitsPerSecond: options.videoBitsPerSecond });
+      }
+      throw error;
+    }
+  }
+
   function drawCaptureFrame(ctx, source, width, height, dpr) {
     const cssWidth = width / dpr;
     const cssHeight = height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, cssWidth, cssHeight);
+    let sourceDrawn = false;
     withRotatedCaptureFrame(ctx, cssWidth, cssHeight, (frameWidth, frameHeight) => {
-      if (source.readyState === undefined || source.readyState >= 2) {
-        ctx.drawImage(source, 0, 0, frameWidth, frameHeight);
+      sourceDrawn = drawCaptureSourceCanvas(ctx, source, frameWidth, frameHeight);
+      if (sourceDrawn && isBlankCaptureFrame(ctx, width, height)) {
+        sourceDrawn = false;
+        restoreLastGoodCaptureFrame(ctx, width, height);
       }
+      if (sourceDrawn) saveLastGoodCaptureFrame(ctx, width, height);
       drawCaptureOverlays(ctx, frameWidth, frameHeight);
     });
+  }
+
+  function drawCaptureSourceCanvas(ctx, sourceCanvas, frameWidth, frameHeight) {
+    const layout = captureCanvasLayout(sourceCanvas, frameWidth, frameHeight);
+    try {
+      ctx.drawImage(sourceCanvas, layout.x, layout.y, layout.width, layout.height);
+      return true;
+    } catch (error) {
+      if (!state.captureDrawErrorLogged) {
+        state.captureDrawErrorLogged = true;
+        log("warn", "Canvas frame could not be drawn into capture compositor", { message: error?.message || String(error) });
+      }
+      return false;
+    }
+  }
+
+  function saveLastGoodCaptureFrame(ctx, width, height) {
+    const frame = state.captureLastGoodFrame;
+    const frameCtx = frame?.getContext("2d");
+    if (!frame || !frameCtx) return;
+    frame.width = width;
+    frame.height = height;
+    frameCtx.setTransform(1, 0, 0, 1, 0, 0);
+    frameCtx.drawImage(ctx.canvas, 0, 0);
+  }
+
+  function restoreLastGoodCaptureFrame(ctx, cssWidth, cssHeight) {
+    const frame = state.captureLastGoodFrame;
+    if (!frame) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(frame, 0, 0, cssWidth, cssHeight);
+    ctx.restore();
+  }
+
+  function isBlankCaptureFrame(ctx, cssWidth, cssHeight) {
+    const points = [
+      [0.12, 0.12], [0.25, 0.5], [0.5, 0.5], [0.75, 0.5], [0.88, 0.88]
+    ];
+    try {
+      return points.every(([x, y]) => {
+        const data = ctx.getImageData(Math.max(0, Math.floor(cssWidth * x)), Math.max(0, Math.floor(cssHeight * y)), 1, 1).data;
+        return Math.max(data[0], data[1], data[2]) < 6;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  function captureCanvasLayout(sourceCanvas, frameWidth, frameHeight) {
+    const sourceRect = sourceCanvas.getBoundingClientRect();
+    const frame = sourceCanvas.ownerDocument?.defaultView?.frameElement;
+    const frameRect = frame?.getBoundingClientRect?.();
+    const x = (frameRect?.left || 0) + sourceRect.left;
+    const y = (frameRect?.top || 0) + sourceRect.top;
+    const width = sourceRect.width || frameWidth;
+    const height = sourceRect.height || frameHeight;
+    return {
+      x: clamp(x, -frameWidth, frameWidth),
+      y: clamp(y, -frameHeight, frameHeight),
+      width: Math.max(1, width),
+      height: Math.max(1, height)
+    };
   }
 
   function withRotatedCaptureFrame(ctx, width, height, draw) {
@@ -1374,18 +1749,42 @@ export function createExhibitionMode(options = {}) {
       drawCaptureCard(ctx, frameWidth, frameHeight);
       return;
     }
-    if (config.showTitleOverlay) {
-      drawCaptureTitle(ctx, frameWidth, frameHeight);
-    }
+    drawCaptureStackedOverlays(ctx, frameWidth, frameHeight);
+    if (config.showHashOverlay && currentDisplayHash()) drawCaptureHash(ctx, frameWidth, frameHeight);
+  }
+
+  function drawCaptureStackedOverlays(ctx, frameWidth, frameHeight) {
+    const entries = [];
+    if (config.showTitleOverlay) entries.push(measureCaptureTitle(ctx, frameWidth, frameHeight));
     if (config.showFreeText && config.freeText) {
-      drawCaptureText(ctx, config.freeText, {
+      entries.push(measureCaptureText(ctx, config.freeText, {
         position: config.freeTextPosition,
         size: config.freeTextSize,
         bold: config.titleOverlayBold,
         maxWidth: Math.min(520, frameWidth * 0.42)
-      }, frameWidth, frameHeight);
+      }, frameWidth, frameHeight));
     }
-    if (config.showQr) drawCaptureQr(ctx, frameWidth, frameHeight, config.qrPosition);
+    if (config.showQr) entries.push(measureCaptureQr(ctx, frameWidth, frameHeight, config.qrPosition));
+
+    const groups = new Map();
+    entries.filter(Boolean).forEach((entry) => {
+      if (!groups.has(entry.position)) groups.set(entry.position, []);
+      groups.get(entry.position).push(entry);
+    });
+
+    groups.forEach((group, position) => {
+      const top = position.startsWith("top");
+      const order = top ? ["title", "free", "qr"] : ["qr", "free", "title"];
+      let offset = 0;
+      order.forEach((key) => {
+        const entry = group.find((item) => item.key === key);
+        if (!entry) return;
+        const [x, baseY] = capturePosition(position, entry.width, entry.height, frameWidth, frameHeight);
+        const y = top ? baseY + offset : baseY - offset;
+        entry.draw(x, y);
+        offset += entry.height + 14;
+      });
+    });
   }
 
   function drawCaptureCard(ctx, frameWidth, frameHeight) {
@@ -1444,8 +1843,16 @@ export function createExhibitionMode(options = {}) {
   }
 
   function drawCaptureText(ctx, text, options, frameWidth, frameHeight) {
-    if (!text) return;
+    const measured = measureCaptureText(ctx, text, options, frameWidth, frameHeight);
+    if (!measured) return;
+    const [x, y] = capturePosition(measured.position, measured.width, measured.height, frameWidth, frameHeight);
+    measured.draw(x, y);
+  }
+
+  function measureCaptureText(ctx, text, options, frameWidth) {
+    if (!text) return null;
     const size = clamp(Number(options.size) || DEFAULTS.titleOverlaySize, 8, 48);
+    const position = normalizeOverlayPosition(options.position);
     const maxWidth = options.maxWidth || Math.min(frameWidth - 36, 720);
     ctx.save();
     ctx.font = `${options.bold ? "700 " : ""}${size}px ${captureFontFamily(config.titleOverlayFont)}`;
@@ -1453,12 +1860,30 @@ export function createExhibitionMode(options = {}) {
     const lines = wrapCaptureText(ctx, text, maxWidth);
     const width = Math.min(maxWidth, Math.max(...lines.map((line) => ctx.measureText(line).width), 1));
     const height = lines.length * size * 1.25;
-    const [x, y] = capturePosition(normalizeOverlayPosition(options.position), width, height, frameWidth, frameHeight);
-    lines.forEach((line, index) => ctx.fillText(line, x, y + size + index * size * 1.25));
     ctx.restore();
+    return {
+      key: "free",
+      position,
+      width,
+      height,
+      draw: (x, y) => {
+        ctx.save();
+        ctx.font = `${options.bold ? "700 " : ""}${size}px ${captureFontFamily(config.titleOverlayFont)}`;
+        ctx.fillStyle = captureTextColor(config.titleOverlayColor);
+        lines.forEach((line, index) => ctx.fillText(line, x, y + size + index * size * 1.25));
+        ctx.restore();
+      }
+    };
   }
 
   function drawCaptureTitle(ctx, frameWidth, frameHeight) {
+    const measured = measureCaptureTitle(ctx, frameWidth, frameHeight);
+    if (!measured) return;
+    const [x, y] = capturePosition(measured.position, measured.width, measured.height, frameWidth, frameHeight);
+    measured.draw(x, y);
+  }
+
+  function measureCaptureTitle(ctx, frameWidth) {
     const titleSize = normalizeTitleOverlaySize(config.titleOverlaySize);
     const parts = formatTitleOverlayParts(config);
     ctx.save();
@@ -1471,27 +1896,65 @@ export function createExhibitionMode(options = {}) {
     const metaWidth = ctx.measureText(meta).width;
     const width = Math.min(frameWidth - 36, titleWidth + metaWidth);
     const height = titleSize * 1.35;
-    const [x, y] = capturePosition(normalizeOverlayPosition(config.titleOverlayPosition), width, height, frameWidth, frameHeight);
-    ctx.fillStyle = captureTextColor(config.titleOverlayColor);
-    ctx.font = titleFont;
-    ctx.fillText(parts.title, x, y + titleSize);
-    ctx.font = metaFont;
-    ctx.fillText(meta, x + titleWidth, y + titleSize);
+    ctx.restore();
+    return {
+      key: "title",
+      position: normalizeOverlayPosition(config.titleOverlayPosition),
+      width,
+      height,
+      draw: (x, y) => {
+        ctx.save();
+        ctx.fillStyle = captureTextColor(config.titleOverlayColor);
+        ctx.font = titleFont;
+        ctx.fillText(parts.title, x, y + titleSize);
+        ctx.font = metaFont;
+        ctx.fillText(meta, x + titleWidth, y + titleSize);
+        ctx.restore();
+      }
+    };
+  }
+
+  function drawCaptureHash(ctx, frameWidth, frameHeight) {
+    const hash = currentDisplayHash();
+    if (!hash) return;
+    const size = normalizeHashOverlaySize(config.hashOverlaySize);
+    const safe = normalizeHashOverlaySafeArea(config.hashOverlaySafeArea);
+    ctx.save();
+    ctx.font = `500 ${size}px ${captureFontFamily("mono")}`;
+    ctx.fillStyle = captureHashColor(config.hashOverlayColor);
+    const width = Math.min(frameWidth - safe * 2, Math.max(1, ctx.measureText(hash).width));
+    const height = size * 1.25;
+    const [x, y] = captureHashPosition(normalizeHashOverlayPosition(config.hashOverlayPosition), width, height, frameWidth, frameHeight, safe);
+    ctx.fillText(hash, x, y + size);
     ctx.restore();
   }
 
   function drawCaptureQr(ctx, frameWidth, frameHeight, position, fixedX, fixedY, fixedSize) {
-    const image = document.querySelector("#p5em-qr-overlay img, #p5em-card-overlay img");
-    if (!image || image.hidden || !image.complete || !image.naturalWidth) return;
-    const size = fixedSize || clamp(Number(config.qrSize) || DEFAULTS.qrSize, 40, 320);
+    const measured = measureCaptureQr(ctx, frameWidth, frameHeight, position, fixedSize);
+    if (!measured) return;
     const [x, y] = fixedX === undefined
-      ? capturePosition(normalizeOverlayPosition(position), size, size, frameWidth, frameHeight)
+      ? capturePosition(measured.position, measured.width, measured.height, frameWidth, frameHeight)
       : [fixedX, fixedY];
-    try {
-      ctx.drawImage(image, x, y, size, size);
-    } catch {
-      // Cross-origin QR providers can refuse canvas drawing. The on-screen QR remains visible.
-    }
+    measured.draw(x, y);
+  }
+
+  function measureCaptureQr(ctx, frameWidth, frameHeight, position, fixedSize) {
+    const image = document.querySelector("#p5em-qr-overlay img, #p5em-card-overlay img");
+    if (!image || image.hidden || !image.complete || !image.naturalWidth) return null;
+    const size = fixedSize || clamp(Number(config.qrSize) || DEFAULTS.qrSize, 40, 320);
+    return {
+      key: "qr",
+      position: normalizeOverlayPosition(position),
+      width: Math.min(size, frameWidth),
+      height: Math.min(size, frameHeight),
+      draw: (x, y) => {
+        try {
+          ctx.drawImage(image, x, y, size, size);
+        } catch {
+          // Cross-origin QR providers can refuse canvas drawing. The on-screen QR remains visible.
+        }
+      }
+    };
   }
 
   function stopCanvasCompositor() {
@@ -1506,6 +1969,7 @@ export function createExhibitionMode(options = {}) {
     state.captureSourceVideo = null;
     state.captureTrack = null;
     state.captureCanvas = null;
+    state.captureLastGoodFrame = null;
   }
 
   async function chooseCaptureFolder() {
@@ -1518,6 +1982,14 @@ export function createExhibitionMode(options = {}) {
     try {
       state.captureDirectoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
       state.captureDirectoryName = state.captureDirectoryHandle.name || "Selected folder";
+      if (isUnsafeCaptureDirectoryName(state.captureDirectoryName)) {
+        state.captureDirectoryHandle = null;
+        state.captureDirectoryName = "";
+        state.captureStatus = "Desktop folder rejected; using browser downloads";
+        log("warn", "Desktop folder rejected for capture output. Choose a dedicated capture folder instead.");
+        updatePanel();
+        return api;
+      }
       state.captureStatus = `Output folder: ${state.captureDirectoryName}`;
     } catch {
       state.captureStatus = "Folder selection cancelled";
@@ -1714,7 +2186,7 @@ export function createExhibitionMode(options = {}) {
     setText("p5em-playlist", d.playlistEnabled ? `${d.playlistIndex + 1} / ${d.playlistCount}` : "Inactive");
     setText("p5em-playlist-interval", formatInterval(d.playlistIntervalSeconds));
     setText("p5em-playlist-hash-interval", formatInterval(d.playlistHashIntervalSeconds));
-    setText("p5em-playlist-hash", d.playlistRandomHash ? "Enabled" : "Disabled");
+    setText("p5em-playlist-hash", d.playlistHashCount ? `${d.playlistHashIndex + 1} / ${d.playlistHashCount}` : d.playlistRandomHash ? "Random" : "Disabled");
     setText("p5em-current-hash", d.currentHash ? shortenMiddle(d.currentHash, 16) : "None");
     setText("p5em-current-hash-full", d.currentHash ? shortenMiddle(d.currentHash, 24) : "None");
     setText("p5em-current-source", shortenMiddle(d.currentSource || "None", 22), d.currentSource || "");
@@ -1748,24 +2220,33 @@ export function createExhibitionMode(options = {}) {
     setInputValue("card-qr-placement", d.cardQrPlacement);
     setInputValue("title-size", d.titleOverlaySize);
     setInputValue("free-text-size", d.freeTextSize);
+    setInputValue("hash-overlay-size", d.hashOverlaySize);
+    setInputValue("hash-overlay-color", d.hashOverlayColor);
     setInputValue("overlay-safe-area", d.overlaySafeArea);
+    setInputValue("hash-overlay-safe-area", d.hashOverlaySafeArea);
     setInputValue("qr-size", d.qrSize);
     setInputValue("title-font", d.titleOverlayFont);
     setInputValue("title-color", d.titleOverlayColor);
     setInputValue("title-position", d.titleOverlayPosition);
     setInputValue("free-text-position", d.freeTextPosition);
+    setInputValue("hash-overlay-position", d.hashOverlayPosition);
     setInputValue("qr-position", d.qrPosition);
+    syncCustomUrlParamRows(state.panel, d.customUrlParams);
     setChecked("title-bold", d.titleOverlayBold);
     setChecked("title-italic", d.titleOverlayItalic);
     setChecked("free-text-overlay", d.freeTextVisible);
+    setChecked("hash-overlay", d.hashOverlayVisible);
     const interval = state.panel.querySelector("[data-input='playlist-interval']");
     if (interval && document.activeElement !== interval) interval.value = playlistConfig().intervalValue ?? intervalDisplayValue(d.playlistIntervalSeconds, playlistConfig().intervalUnit);
     const intervalUnit = state.panel.querySelector("[data-input='playlist-interval-unit']");
     if (intervalUnit && document.activeElement !== intervalUnit) intervalUnit.value = normalizeIntervalUnit(playlistConfig().intervalUnit);
+    setInputValue("playlist-item-order", playlistConfig().itemOrder);
     const hashInterval = state.panel.querySelector("[data-input='playlist-hash-interval']");
     if (hashInterval && document.activeElement !== hashInterval) hashInterval.value = playlistConfig().hashIntervalValue ?? intervalDisplayValue(d.playlistHashIntervalSeconds, playlistConfig().hashIntervalUnit);
     const hashIntervalUnit = state.panel.querySelector("[data-input='playlist-hash-interval-unit']");
     if (hashIntervalUnit && document.activeElement !== hashIntervalUnit) hashIntervalUnit.value = normalizeIntervalUnit(playlistConfig().hashIntervalUnit);
+    setInputValue("playlist-hash-order", playlistConfig().hashOrder);
+    updateSpecificHashSectionState(state.panel, Boolean(playlistConfig().randomHash));
     const rotation = state.panel.querySelector("[data-input='rotation']");
     if (rotation && document.activeElement !== rotation) rotation.value = d.rotation;
     setInputValue("capture-filename", captureConfig().filename);
@@ -1774,6 +2255,7 @@ export function createExhibitionMode(options = {}) {
     setInputValue("capture-bitrate", Math.round((Number(captureConfig().videoBitsPerSecond) || DEFAULTS.capture.videoBitsPerSecond) / 1000000));
     setInputValue("capture-fps", captureConfig().frameRate);
     setChecked("capture-audio", captureConfig().includeAudio);
+    setChecked("capture-hide-panel", captureConfig().hidePanelDuringCapture);
   }
 
   function setText(key, value, title = "") {
@@ -1837,7 +2319,14 @@ export function createExhibitionMode(options = {}) {
     setPlaylistRandomHash,
     setPlaylistOptions,
     setPlaylistItems,
+    setPlaylistHashes,
+    setCustomUrlParams,
+    restoreDefaultPlaylist,
+    saveDefaultPlaylist,
+    loadLocalFolderPlaylist,
+    loadServedPlaylist,
     previewPlaylistUrl,
+    openCurrentSource,
     clearLogs,
     startCapture,
     stopCapture,
@@ -1898,6 +2387,14 @@ function createPanel(config, api) {
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
+          <div class="p5em-url-param-head">
+            <h2>Artwork URL Params</h2>
+            <button type="button" data-action="custom-url-param-add">+</button>
+          </div>
+          <div class="p5em-custom-url-param-rows" data-custom-url-param-rows></div>
+          <p>Added to every loaded artwork URL before the hash. Example: name ui, value false.</p>
+        </div>
+        <div class="p5em-control-group p5em-control-group-wide">
           <h2>Hash Recording</h2>
           <label class="p5em-text-control">
             <span>Hash Number</span>
@@ -1935,7 +2432,7 @@ function createPanel(config, api) {
           </label>
           <label class="p5em-text-control p5em-wide-control">
             <span>Free Text</span>
-            <textarea data-input="free-text" rows="5" placeholder="Description, caption, venue note...">${escapeHtml(config.freeText)}</textarea>
+            <textarea data-input="free-text" rows="3" placeholder="Description, caption, venue note...">${escapeHtml(config.freeText)}</textarea>
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide p5em-compact-group">
@@ -1955,6 +2452,7 @@ function createPanel(config, api) {
           ${toggle("title-overlay", "Show title")}
           ${toggle("qr-overlay", "Show QR")}
           ${toggle("free-text-overlay", "Show text")}
+          ${toggle("hash-overlay", "Show hash")}
           ${toggle("title-bold", "Bold title")}
           ${toggle("title-italic", "Italic title")}
           <label class="p5em-number-control">
@@ -1980,8 +2478,22 @@ function createPanel(config, api) {
             <input data-input="free-text-size" type="range" min="8" max="48" step="1" value="${config.freeTextSize}">
           </label>
           <label class="p5em-number-control">
+            <span>Hash Size</span>
+            <input data-input="hash-overlay-size" type="range" min="7" max="24" step="1" value="${config.hashOverlaySize}">
+          </label>
+          <label class="p5em-number-control">
+            <span>Hash Color</span>
+            <select data-input="hash-overlay-color">
+              ${hashColorOptions(config.hashOverlayColor)}
+            </select>
+          </label>
+          <label class="p5em-number-control">
             <span>Safe Border</span>
             <input data-input="overlay-safe-area" type="range" min="0" max="160" step="2" value="${config.overlaySafeArea}">
+          </label>
+          <label class="p5em-number-control">
+            <span>Hash Safe Border</span>
+            <input data-input="hash-overlay-safe-area" type="range" min="0" max="240" step="2" value="${config.hashOverlaySafeArea}">
           </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
@@ -2004,6 +2516,12 @@ function createPanel(config, api) {
               ${positionOptions(config.qrPosition)}
             </select>
           </label>
+          <label class="p5em-number-control">
+            <span>Hash Position</span>
+            <select data-input="hash-overlay-position">
+              ${hashPositionOptions(config.hashOverlayPosition)}
+            </select>
+          </label>
         </div>
         <div class="p5em-control-group p5em-control-group-wide">
           <h2>QR Code</h2>
@@ -2022,12 +2540,23 @@ function createPanel(config, api) {
       <section class="p5em-playlist-editor">
         <div class="p5em-playlist-head">
           <h2>Playlist URLs</h2>
-          <button type="button" data-action="playlist-add">+</button>
+          <div>
+            <button type="button" data-action="playlist-restore-defaults">Restore Defaults</button>
+            <button type="button" data-action="playlist-save-defaults">Save Defaults</button>
+            <button type="button" data-action="playlist-load-local-folder">Load Local Folder</button>
+            <button type="button" data-action="playlist-add">+</button>
+          </div>
         </div>
         <div class="p5em-playlist-options">
           ${toggle("playlist", "Playlist mode")}
           <label class="p5em-number-control">
-            <span>Playlist Interval</span>
+            <span>Artwork Order</span>
+            <select data-input="playlist-item-order">
+              ${playlistOrderOptions(playlistConfigFrom(config).itemOrder)}
+            </select>
+          </label>
+          <label class="p5em-number-control">
+            <span>Artwork Interval</span>
             <input data-input="playlist-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).intervalSeconds}">
           </label>
           <label class="p5em-number-control">
@@ -2038,7 +2567,21 @@ function createPanel(config, api) {
               <option value="hours">Hours</option>
             </select>
           </label>
-          ${toggle("playlist-hash", "Random ?hash=")}
+        </div>
+        <div class="p5em-playlist-rows" data-playlist-rows></div>
+      </section>
+      <section class="p5em-playlist-editor p5em-playlist-section">
+        <div class="p5em-playlist-head">
+          <h2>Hash Playlist</h2>
+        </div>
+        <div class="p5em-playlist-options">
+          ${toggle("playlist-hash", "Generate random hashes")}
+          <label class="p5em-number-control">
+            <span>Hash Order</span>
+            <select data-input="playlist-hash-order">
+              ${playlistOrderOptions(playlistConfigFrom(config).hashOrder)}
+            </select>
+          </label>
           <label class="p5em-number-control">
             <span>Hash Interval</span>
             <input data-input="playlist-hash-interval" type="number" min="5" step="5" value="${playlistConfigFrom(config).hashIntervalSeconds}">
@@ -2052,8 +2595,14 @@ function createPanel(config, api) {
             </select>
           </label>
         </div>
-        <div class="p5em-playlist-rows" data-playlist-rows></div>
-        <p>Type a served local path or web URL. Apply URLs persists settings. Drop HTML is temporary preview only and is available for local rows.</p>
+        <div class="p5em-specific-hash-section" data-specific-hash-section>
+          <div class="p5em-playlist-head p5em-playlist-subhead">
+            <h2>Specific Hashes</h2>
+            <button type="button" data-action="playlist-hash-add">+</button>
+          </div>
+          <div class="p5em-playlist-hash-rows" data-playlist-hash-rows></div>
+        </div>
+        <p>Artwork rows choose the URL or local path. Random hashes generates new ?hash= values. Specific hashes play exact values when random hashes is off. Each list has its own loop or random order.</p>
       </section>
     </div>
     <div class="p5em-tab-panel" data-panel="capture" role="tabpanel" hidden>
@@ -2088,14 +2637,16 @@ function createPanel(config, api) {
             <input data-input="capture-fps" type="number" min="15" max="120" step="1" value="${captureConfigFrom(config).frameRate}">
           </label>
           ${toggle("capture-audio", "Include audio")}
+          ${toggle("capture-hide-panel", "Hide panel while recording")}
           <div class="p5em-button-row">
             <button type="button" data-action="capture-folder">Browse Folder</button>
+            <button type="button" data-action="open-current-source">Open Artwork</button>
             <button type="button" data-action="screenshot">Save Still</button>
             <button type="button" data-action="capture-start">Start Recording</button>
             <button type="button" data-action="capture-stop">Stop Recording</button>
           </div>
         </div>
-        <p>Auto uses direct artwork canvas recording when possible, with no screen-share prompt or browser chrome. Screen/Tab is only needed for iframe playlist URLs and cross-origin artworks. Press Shift + C to stop without reopening the panel.</p>
+        <p>Auto records the artwork canvas and overlay layout directly at the current browser window size. It does not request screen capture, include browser chrome, or force fullscreen. WebM is the reliable browser format; H.264 MP4 depends on browser support. ProRes requires the FFmpeg helper after recording. Use Recording - Stop or Shift + C to stop.</p>
       </section>
     </div>
     <div class="p5em-tab-panel" data-panel="log" role="tabpanel" hidden>
@@ -2111,7 +2662,7 @@ function createPanel(config, api) {
     <div class="p5em-panel-actions">
       <button type="button" data-action="fullscreen">Fullscreen</button>
       <button type="button" data-action="reset">Reset</button>
-      <button type="button" data-action="playlist-apply">Apply URLs</button>
+      <button type="button" data-action="playlist-apply">Apply Playlist</button>
       <button type="button" data-action="playlist-save-json">Save JSON</button>
       <button type="button" data-action="runtime-load-json">Load JSON</button>
       <button type="button" data-action="playlist-prev">Prev URL</button>
@@ -2140,10 +2691,26 @@ function createPanel(config, api) {
     if (action === "hash-record-clear") api.clearHashRecording();
     if (action === "playlist-apply") {
       api.setPlaylistItems(collectPlaylistRows(panel));
+      api.setPlaylistHashes(collectPlaylistHashRows(panel));
     }
+    if (action === "playlist-restore-defaults") api.restoreDefaultPlaylist();
+    if (action === "playlist-save-defaults") api.saveDefaultPlaylist();
+    if (action === "playlist-load-local-folder") api.loadLocalFolderPlaylist();
     if (action === "playlist-save-json") api.exportConfig();
     if (action === "runtime-load-json") panel.querySelector("[data-input='runtime-config-file']")?.click();
+    if (action === "custom-url-param-add") {
+      addCustomUrlParamRow(panel, {});
+      const container = panel.querySelector("[data-custom-url-param-rows]");
+      if (container) container.dataset.dirty = "true";
+    }
+    if (action === "custom-url-param-remove") {
+      event.target.closest(".p5em-custom-url-param-row")?.remove();
+      const container = panel.querySelector("[data-custom-url-param-rows]");
+      if (container) container.dataset.dirty = "true";
+      api.setCustomUrlParams(collectCustomUrlParamRows(panel));
+    }
     if (action === "capture-folder") api.chooseCaptureFolder();
+    if (action === "open-current-source") api.openCurrentSource();
     if (action === "capture-start") api.startCapture(collectCaptureOptions(panel));
     if (action === "capture-stop") api.stopCapture();
     if (action === "playlist-add") {
@@ -2155,6 +2722,28 @@ function createPanel(config, api) {
       event.target.closest(".p5em-playlist-row")?.remove();
       const container = panel.querySelector("[data-playlist-rows]");
       if (container) container.dataset.dirty = "true";
+    }
+    if (action === "playlist-hash-add") {
+      if (playlistConfigFrom(api.getConfig()).randomHash) return;
+      addPlaylistHashRow(panel, "");
+      const container = panel.querySelector("[data-playlist-hash-rows]");
+      if (container) container.dataset.dirty = "true";
+    }
+    if (action === "playlist-hash-remove") {
+      if (playlistConfigFrom(api.getConfig()).randomHash) return;
+      event.target.closest(".p5em-playlist-hash-row")?.remove();
+      const container = panel.querySelector("[data-playlist-hash-rows]");
+      if (container) container.dataset.dirty = "true";
+      api.setPlaylistHashes(collectPlaylistHashRows(panel));
+    }
+    if (action === "playlist-hash-generate") {
+      if (playlistConfigFrom(api.getConfig()).randomHash) return;
+      const row = event.target.closest(".p5em-playlist-hash-row");
+      const input = row?.querySelector("[data-input='playlist-hash']");
+      if (input) input.value = randomHashValue();
+      const container = panel.querySelector("[data-playlist-hash-rows]");
+      if (container) container.dataset.dirty = "true";
+      api.setPlaylistHashes(collectPlaylistHashRows(panel));
     }
     if (action === "playlist-preview") {
       const row = event.target.closest(".p5em-playlist-row");
@@ -2172,6 +2761,7 @@ function createPanel(config, api) {
     if (toggle === "title-overlay") api.setArtworkMetadata({ showTitleOverlay: event.target.checked });
     if (toggle === "qr-overlay") api.setQrOptions({ showQr: event.target.checked });
     if (toggle === "free-text-overlay") api.setArtworkMetadata({ showFreeText: event.target.checked });
+    if (toggle === "hash-overlay") api.setArtworkMetadata({ showHashOverlay: event.target.checked });
     if (toggle === "title-bold") api.setArtworkMetadata({ titleOverlayBold: event.target.checked });
     if (toggle === "title-italic") api.setArtworkMetadata({ titleOverlayItalic: event.target.checked });
     if (toggle === "reduced-motion") api.setAccessibility({ reducedMotion: event.target.checked });
@@ -2188,6 +2778,9 @@ function createPanel(config, api) {
       const value = panel.querySelector("[data-input='playlist-interval']")?.value || 1;
       api.setPlaylistIntervalParts(value, event.target.value);
     }
+    if (event.target?.dataset?.input === "playlist-item-order") {
+      api.setPlaylistOptions({ itemOrder: event.target.value });
+    }
     if (event.target?.dataset?.input === "playlist-hash-interval") {
       const unit = panel.querySelector("[data-input='playlist-hash-interval-unit']")?.value || "seconds";
       api.setPlaylistHashIntervalParts(event.target.value, unit);
@@ -2195,6 +2788,9 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "playlist-hash-interval-unit") {
       const value = panel.querySelector("[data-input='playlist-hash-interval']")?.value || 1;
       api.setPlaylistHashIntervalParts(value, event.target.value);
+    }
+    if (event.target?.dataset?.input === "playlist-hash-order") {
+      api.setPlaylistOptions({ hashOrder: event.target.value });
     }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
@@ -2220,6 +2816,15 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "free-text-size") {
       api.setArtworkMetadata({ freeTextSize: event.target.value });
     }
+    if (event.target?.dataset?.input === "hash-overlay-size") {
+      api.setArtworkMetadata({ hashOverlaySize: event.target.value });
+    }
+    if (event.target?.dataset?.input === "hash-overlay-safe-area") {
+      api.setArtworkMetadata({ hashOverlaySafeArea: event.target.value });
+    }
+    if (event.target?.dataset?.input === "hash-overlay-color") {
+      api.setArtworkMetadata({ hashOverlayColor: event.target.value });
+    }
     if (event.target?.dataset?.input === "overlay-layout") {
       api.setOverlayLayout(event.target.value);
     }
@@ -2241,6 +2846,9 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "free-text-position") {
       api.setArtworkMetadata({ freeTextPosition: event.target.value });
     }
+    if (event.target?.dataset?.input === "hash-overlay-position") {
+      api.setArtworkMetadata({ hashOverlayPosition: event.target.value });
+    }
     if (event.target?.dataset?.input === "qr-link") {
       api.setQrOptions({ qrLink: event.target.value });
     }
@@ -2258,18 +2866,37 @@ function createPanel(config, api) {
       previewDroppedArtwork(event.target, api, event.target.closest(".p5em-playlist-row"));
       event.target.value = "";
     }
+    if (event.target?.dataset?.input === "playlist-hash") {
+      if (playlistConfigFrom(api.getConfig()).randomHash) return;
+      const container = panel.querySelector("[data-playlist-hash-rows]");
+      if (container) container.dataset.dirty = "true";
+      api.setPlaylistHashes(collectPlaylistHashRows(panel));
+    }
+    if (event.target?.dataset?.input === "custom-url-param-name" || event.target?.dataset?.input === "custom-url-param-value") {
+      const container = panel.querySelector("[data-custom-url-param-rows]");
+      if (container) container.dataset.dirty = "true";
+      api.setCustomUrlParams(collectCustomUrlParamRows(panel));
+    }
     if (event.target?.dataset?.input === "runtime-config-file") {
       loadConfigFile(event.target.files?.[0], api, panel);
       event.target.value = "";
     }
   });
   syncPlaylistRows(panel, playlistConfigFrom(config).items);
+  syncPlaylistHashRows(panel, playlistConfigFrom(config).hashes);
+  syncCustomUrlParamRows(panel, normalizeCustomUrlParams(config.customUrlParams));
   return panel;
 }
 
 function playlistConfigFrom(config) {
-  if (Array.isArray(config.playlist)) return { ...DEFAULTS.playlist, enabled: true, items: config.playlist };
-  return { ...DEFAULTS.playlist, ...(config.playlist || {}) };
+  const playlist = Array.isArray(config.playlist)
+    ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist }
+    : { ...DEFAULTS.playlist, ...(config.playlist || {}) };
+  playlist.items = normalizePlaylistItems(playlist.items);
+  playlist.hashes = normalizePlaylistHashes(playlist.hashes);
+  playlist.itemOrder = normalizePlaylistOrder(playlist.itemOrder);
+  playlist.hashOrder = normalizePlaylistOrder(playlist.hashOrder);
+  return playlist;
 }
 
 function captureConfigFrom(config) {
@@ -2280,25 +2907,31 @@ function captureSourceOptions(selected = "auto") {
   const normalized = normalizeCaptureSource(selected);
   return [
     ["auto", "Auto"],
-    ["canvas", "Artwork Canvas"],
-    ["screen", "Screen / Tab"]
+    ["canvas", "Artwork Canvas"]
   ].map(([value, label]) => `<option value="${value}"${value === normalized ? " selected" : ""}>${label}</option>`).join("");
 }
 
 function captureCodecOptions(selected = "auto") {
   const options = [
-    ["auto", "Auto"],
-    ["h264", "H.264 MP4"],
+    ["webm", "WebM"],
     ["vp9", "WebM VP9"],
     ["vp8", "WebM VP8"],
-    ["webm", "WebM"],
+    ["h264", "H.264 MP4 (experimental)"],
+    ["auto", "Auto"],
     ["default", "Browser default"]
   ];
   return `${options.map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`).join("")}<option value="prores" disabled>ProRes requires helper</option>`;
 }
 
+function playlistOrderOptions(selected = "loop") {
+  return [
+    ["loop", "Loop"],
+    ["random", "Random"]
+  ].map(([value, label]) => `<option value="${value}"${normalizePlaylistOrder(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
 function normalizeCaptureSource(value) {
-  if (value === "canvas" || value === "screen") return value;
+  if (value === "canvas") return value;
   return "auto";
 }
 
@@ -2437,6 +3070,63 @@ function syncPlaylistRows(panel, items, options = {}) {
   (urls.length ? urls : [""]).forEach((url) => addPlaylistRow(panel, url));
 }
 
+function syncPlaylistHashRows(panel, hashes, options = {}) {
+  const container = panel?.querySelector("[data-playlist-hash-rows]");
+  if (!container || (!options.force && container.dataset.editing === "true")) return;
+  if (!options.force && container.dataset.dirty === "true") return;
+  const values = normalizePlaylistHashes(hashes);
+  container.innerHTML = "";
+  container.dataset.dirty = "false";
+  container.dataset.editing = "false";
+  (values.length ? values : [""]).forEach((hash) => addPlaylistHashRow(panel, hash));
+  updateSpecificHashSectionState(panel, Boolean(playlistConfigFrom(panel.__p5emApi?.getConfig?.() || {}).randomHash));
+}
+
+function syncCustomUrlParamRows(panel, params, options = {}) {
+  const container = panel?.querySelector("[data-custom-url-param-rows]");
+  if (!container || (!options.force && container.dataset.editing === "true")) return;
+  if (!options.force && container.dataset.dirty === "true") return;
+  const values = normalizeCustomUrlParams(params);
+  container.innerHTML = "";
+  container.dataset.dirty = "false";
+  container.dataset.editing = "false";
+  (values.length ? values : [{}]).forEach((param) => addCustomUrlParamRow(panel, param));
+}
+
+function addCustomUrlParamRow(panel, param = {}) {
+  const container = panel.querySelector("[data-custom-url-param-rows]");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "p5em-custom-url-param-row";
+  row.innerHTML = `
+    <input data-input="custom-url-param-name" type="text" value="${escapeAttr(param.name || "")}" placeholder="name">
+    <input data-input="custom-url-param-value" type="text" value="${escapeAttr(param.value || "")}" placeholder="value">
+    <button type="button" data-action="custom-url-param-remove" aria-label="Remove URL parameter">-</button>
+  `;
+  row.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("focus", () => {
+      container.dataset.editing = "true";
+    });
+    input.addEventListener("input", () => {
+      container.dataset.dirty = "true";
+    });
+    input.addEventListener("blur", () => {
+      container.dataset.editing = "false";
+    });
+  });
+  container.appendChild(row);
+}
+
+function updateSpecificHashSectionState(panel, disabled) {
+  const section = panel?.querySelector("[data-specific-hash-section]");
+  if (!section) return;
+  section.classList.toggle("is-disabled", disabled);
+  section.setAttribute("aria-disabled", disabled ? "true" : "false");
+  section.querySelectorAll("input, button").forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
 function addPlaylistRow(panel, value = "") {
   const container = panel.querySelector("[data-playlist-rows]");
   if (!container) return;
@@ -2452,7 +3142,7 @@ function addPlaylistRow(panel, value = "") {
     <input data-input="playlist-url" type="text" value="${escapeAttr(value)}" placeholder="${kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html"}">
     <button type="button" data-action="playlist-preview">Preview</button>
     <label class="p5em-drop-zone">
-      <span>Drop HTML</span>
+      <span>Temp HTML</span>
       <input data-input="playlist-file" type="file" accept=".html,text/html">
     </label>
     <button type="button" data-action="playlist-remove" aria-label="Remove playlist URL">-</button>
@@ -2476,6 +3166,28 @@ function addPlaylistRow(panel, value = "") {
     container.dataset.dirty = "true";
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("blur", () => {
+    container.dataset.editing = "false";
+  });
+  container.appendChild(row);
+}
+
+function addPlaylistHashRow(panel, value = "") {
+  const container = panel.querySelector("[data-playlist-hash-rows]");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "p5em-playlist-hash-row";
+  row.innerHTML = `
+    <input data-input="playlist-hash" type="text" value="${escapeAttr(value)}" placeholder="0x...">
+    <button type="button" data-action="playlist-hash-generate">Generate</button>
+    <button type="button" data-action="playlist-hash-remove" aria-label="Remove playlist hash">-</button>
+  `;
+  row.querySelector("[data-input='playlist-hash']").addEventListener("focus", () => {
+    container.dataset.editing = "true";
+  });
+  row.querySelector("[data-input='playlist-hash']").addEventListener("input", () => {
+    container.dataset.dirty = "true";
+  });
+  row.querySelector("[data-input='playlist-hash']").addEventListener("blur", () => {
     container.dataset.editing = "false";
   });
   container.appendChild(row);
@@ -2641,6 +3353,19 @@ function collectPlaylistRows(panel) {
     .filter(Boolean);
 }
 
+function collectPlaylistHashRows(panel) {
+  return normalizePlaylistHashes(Array.from(panel.querySelectorAll("[data-input='playlist-hash']"))
+    .map((input) => input.value.trim())
+    .filter(Boolean));
+}
+
+function collectCustomUrlParamRows(panel) {
+  return normalizeCustomUrlParams(Array.from(panel.querySelectorAll(".p5em-custom-url-param-row")).map((row) => ({
+    name: row.querySelector("[data-input='custom-url-param-name']")?.value,
+    value: row.querySelector("[data-input='custom-url-param-value']")?.value
+  })));
+}
+
 function collectCaptureOptions(panel) {
   const bitrateMbps = Number(panel.querySelector("[data-input='capture-bitrate']")?.value) || 30;
   return {
@@ -2650,7 +3375,9 @@ function collectCaptureOptions(panel) {
     videoBitsPerSecond: Math.max(1, bitrateMbps) * 1000000,
     frameRate: Number(panel.querySelector("[data-input='capture-fps']")?.value) || DEFAULTS.capture.frameRate,
     includeAudio: Boolean(panel.querySelector("[data-toggle='capture-audio']")?.checked),
-    hidePanelDuringCapture: Boolean(panel.querySelector("[data-toggle='capture-hide-panel']")?.checked)
+    hidePanelDuringCapture: panel.querySelector("[data-toggle='capture-hide-panel']")
+      ? Boolean(panel.querySelector("[data-toggle='capture-hide-panel']")?.checked)
+      : DEFAULTS.capture.hidePanelDuringCapture
   };
 }
 
@@ -2675,6 +3402,28 @@ function absolutePathToHelperUrl(value, prefix = "/__p5em/abs/") {
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${base}${encodedPath}${suffix}`;
+}
+
+function remoteUrlToLocalMirrorPath(value, mirrorRoot) {
+  const url = safeUrl(value);
+  if (!url || !/^https?:$/.test(url.protocol)) return "";
+  const root = String(mirrorRoot || "").trim().replace(/\/+$/, "");
+  if (!root) return "";
+  const host = url.hostname.replace(/^www\./, "");
+  const rootBase = pathJoinForUrlMirror(root, host);
+  const pathname = decodeURIComponent(url.pathname || "/");
+  const filePath = pathname.endsWith("/")
+    ? `${pathname}index.html`
+    : pathname.split("/").pop()?.includes(".")
+      ? pathname
+      : `${pathname}/index.html`;
+  return `${rootBase}${filePath.startsWith("/") ? "" : "/"}${filePath}${url.search || ""}${url.hash || ""}`;
+}
+
+function pathJoinForUrlMirror(root, host) {
+  const normalizedRoot = root.replace(/\/+$/, "");
+  if (normalizedRoot.split("/").pop() === host) return normalizedRoot;
+  return `${normalizedRoot}/${host}`;
 }
 
 function injectStyles() {
@@ -2762,7 +3511,8 @@ function injectStyles() {
       pointer-events: none;
     }
     #p5em-title-overlay,
-    #p5em-free-text-overlay {
+    #p5em-free-text-overlay,
+    #p5em-hash-overlay {
       position: absolute;
       max-width: min(520px, calc(100% - 36px));
       font: 500 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2770,11 +3520,50 @@ function injectStyles() {
       text-transform: uppercase;
       pointer-events: none;
     }
+    #p5em-hash-overlay {
+      max-width: min(320px, calc(100% - 36px));
+      color: rgba(255,255,255,0.72);
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      line-height: 1.2;
+      text-transform: none;
+    }
+    #p5em-hash-overlay[data-color="black"] {
+      color: rgba(0,0,0,0.78);
+    }
+    #p5em-recording-indicator {
+      position: fixed;
+      right: 18px;
+      top: 18px;
+      z-index: 2147483647;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      padding: 0 13px;
+      color: rgba(255,255,255,0.94);
+      background: rgba(150,25,25,0.92);
+      border: 1px solid rgba(255,255,255,0.32);
+      border-radius: 0;
+      font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    #p5em-recording-indicator::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      background: currentColor;
+      border-radius: 999px;
+    }
     #p5em-free-text-overlay {
       max-width: min(620px, calc(100% - 36px));
       line-height: 1.45;
       letter-spacing: 0.03em;
       text-transform: none;
+      white-space: pre-line;
     }
     #p5em-card-overlay {
       position: absolute;
@@ -2966,7 +3755,7 @@ function injectStyles() {
     #p5em-free-text-overlay[data-position^="top"],
     #p5em-qr-overlay[data-position^="top"],
     #p5em-card-overlay[data-position^="top"] {
-      top: var(--p5em-overlay-safe-area, 18px);
+      top: calc(var(--p5em-overlay-safe-area, 18px) + var(--p5em-stack-offset, 0px));
       bottom: auto;
     }
     #p5em-title-overlay[data-position^="bottom"],
@@ -2974,19 +3763,23 @@ function injectStyles() {
     #p5em-qr-overlay[data-position^="bottom"],
     #p5em-card-overlay[data-position^="bottom"] {
       top: auto;
-      bottom: var(--p5em-overlay-safe-area, 18px);
+      bottom: calc(var(--p5em-overlay-safe-area, 18px) + var(--p5em-stack-offset, 0px));
     }
-    #p5em-title-overlay[data-stack-qr="true"][data-position^="bottom"] {
-      bottom: calc(var(--p5em-overlay-safe-area, 18px) + var(--p5em-qr-stack-offset, 110px));
-    }
-    #p5em-qr-overlay[data-stack-title="true"][data-position^="top"] {
-      top: calc(var(--p5em-overlay-safe-area, 18px) + 52px);
+    #p5em-hash-overlay[data-position^="bottom"] {
+      top: auto;
+      bottom: var(--p5em-hash-safe-area, 18px);
     }
     #p5em-title-overlay[data-position$="left"],
     #p5em-free-text-overlay[data-position$="left"],
     #p5em-qr-overlay[data-position$="left"],
     #p5em-card-overlay[data-position$="left"] {
       left: var(--p5em-overlay-safe-area, 18px);
+      right: auto;
+      transform: none;
+      text-align: left;
+    }
+    #p5em-hash-overlay[data-position$="left"] {
+      left: var(--p5em-hash-safe-area, 18px);
       right: auto;
       transform: none;
       text-align: left;
@@ -3006,6 +3799,12 @@ function injectStyles() {
     #p5em-card-overlay[data-position$="right"] {
       left: auto;
       right: var(--p5em-overlay-safe-area, 18px);
+      transform: none;
+      text-align: right;
+    }
+    #p5em-hash-overlay[data-position$="right"] {
+      left: auto;
+      right: var(--p5em-hash-safe-area, 18px);
       transform: none;
       text-align: right;
     }
@@ -3039,7 +3838,7 @@ function injectStyles() {
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      padding: 14px;
+      padding: 12px;
       color: rgba(255,255,255,0.9);
       background: rgba(7,7,7,0.86);
       border: 1px solid rgba(255,255,255,0.16);
@@ -3065,7 +3864,7 @@ function injectStyles() {
       align-items: center;
       justify-content: space-between;
       gap: 18px;
-      padding-bottom: 10px;
+      padding-bottom: 8px;
       flex: 0 0 auto;
       border-bottom: 1px solid rgba(255,255,255,0.14);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -3091,19 +3890,19 @@ function injectStyles() {
       cursor: pointer;
     }
     .p5em-panel-header button {
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       font-size: 18px;
       line-height: 1;
     }
     .p5em-tabs {
       display: flex;
-      gap: 7px;
+      gap: 6px;
       flex: 0 0 auto;
-      margin-top: 10px;
+      margin-top: 8px;
     }
     .p5em-tabs button {
-      padding: 7px 10px;
+      padding: 6px 9px;
       color: rgba(255,255,255,0.48);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -3120,7 +3919,7 @@ function injectStyles() {
       min-height: 0;
       display: none;
       flex-direction: column;
-      overflow: auto;
+      overflow: hidden;
       padding-right: 2px;
     }
     .p5em-tab-panel.is-active {
@@ -3129,13 +3928,13 @@ function injectStyles() {
     .p5em-panel-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px 14px;
-      margin-top: 12px;
+      gap: 7px 12px;
+      margin-top: 8px;
       flex: 0 0 auto;
     }
     .p5em-panel-grid section {
       border-top: 1px solid rgba(255,255,255,0.14);
-      padding-top: 8px;
+      padding-top: 6px;
     }
     .p5em-panel-grid h2 {
       margin: 0 0 6px;
@@ -3148,8 +3947,8 @@ function injectStyles() {
     .p5em-panel-grid div {
       display: flex;
       justify-content: space-between;
-      gap: 14px;
-      padding: 2px 0;
+      gap: 10px;
+      padding: 1px 0;
     }
     .p5em-panel-grid span {
       color: rgba(255,255,255,0.48);
@@ -3167,8 +3966,8 @@ function injectStyles() {
     .p5em-panel-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 7px;
-      margin-top: 10px;
+      gap: 6px;
+      margin-top: 8px;
       flex: 0 0 auto;
       min-height: 0;
     }
@@ -3176,18 +3975,18 @@ function injectStyles() {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 7px 12px;
-      margin-top: 10px;
-      padding-top: 10px;
+      margin-top: 8px;
+      padding-top: 8px;
       flex: 0 0 auto;
       border-top: 1px solid rgba(255,255,255,0.14);
     }
     .p5em-overlay-controls {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      margin-top: 10px;
-      padding-top: 10px;
-      overflow: auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 10px;
+      margin-top: 8px;
+      padding-top: 8px;
+      overflow: hidden;
       flex: 1 1 auto;
       min-height: 0;
       border-top: 1px solid rgba(255,255,255,0.14);
@@ -3195,12 +3994,32 @@ function injectStyles() {
     .p5em-control-group {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 7px 12px;
-      padding: 8px 0;
+      gap: 6px 10px;
+      padding: 6px 0;
       border-top: 1px solid rgba(255,255,255,0.12);
     }
     .p5em-control-group-wide {
       grid-column: 1 / -1;
+    }
+    .p5em-overlay-controls .p5em-control-group-wide {
+      grid-column: auto;
+    }
+    .p5em-overlay-controls .p5em-control-group {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+      gap: 5px 9px;
+      padding: 4px 0;
+    }
+    .p5em-panel-controls .p5em-control-group-wide {
+      grid-column: auto;
+    }
+    .p5em-panel-controls .p5em-control-group {
+      grid-template-columns: minmax(0, 1fr);
+      align-content: start;
+      gap: 6px;
+    }
+    .p5em-panel-controls .p5em-control-group p {
+      display: none;
     }
     .p5em-compact-group {
       align-items: center;
@@ -3221,14 +4040,14 @@ function injectStyles() {
       grid-column: 1 / -1;
       display: flex;
       flex-wrap: wrap;
-      gap: 7px;
+      gap: 6px;
     }
     .p5em-copy-field {
       grid-column: span 2;
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       min-width: 0;
       color: rgba(255,255,255,0.58);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -3246,9 +4065,17 @@ function injectStyles() {
       text-transform: none;
       letter-spacing: 0.02em;
     }
+    .p5em-panel-controls .p5em-copy-field {
+      grid-column: 1 / -1;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .p5em-panel-controls .p5em-copy-field span {
+      display: none;
+    }
     .p5em-copy-field button,
-    .p5em-button-row button {
-      padding: 7px 8px;
+    .p5em-button-row button,
+    .p5em-url-param-head button {
+      padding: 6px 7px;
       color: rgba(255,255,255,0.78);
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.18);
@@ -3258,9 +4085,59 @@ function injectStyles() {
       text-transform: uppercase;
       cursor: pointer;
     }
+    .p5em-url-param-head {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .p5em-url-param-head h2 {
+      margin: 0;
+    }
+    .p5em-custom-url-param-rows {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .p5em-custom-url-param-row {
+      display: grid;
+      grid-template-columns: minmax(54px, 0.45fr) minmax(0, 1fr) 24px;
+      gap: 5px;
+      align-items: center;
+    }
+    .p5em-custom-url-param-row input {
+      min-width: 0;
+      padding: 5px 7px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 0;
+      font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .p5em-custom-url-param-row button {
+      padding: 5px 7px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      cursor: pointer;
+    }
+    .p5em-control-group p {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: rgba(255,255,255,0.38);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
     .p5em-text-control {
       display: grid;
-      gap: 5px;
+      gap: 4px;
       color: rgba(255,255,255,0.58);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -3270,7 +4147,7 @@ function injectStyles() {
     .p5em-text-control input,
     .p5em-text-control textarea {
       min-width: 0;
-      padding: 7px 8px;
+      padding: 5px 7px;
       color: rgba(255,255,255,0.9);
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.18);
@@ -3278,7 +4155,8 @@ function injectStyles() {
       font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .p5em-text-control textarea {
-      min-height: 84px;
+      min-height: 42px;
+      max-height: 58px;
       resize: vertical;
       text-transform: none;
       letter-spacing: 0.02em;
@@ -3291,6 +4169,12 @@ function injectStyles() {
       display: flex;
       flex-direction: column;
       border-top: 1px solid rgba(255,255,255,0.14);
+    }
+    .p5em-playlist-section {
+      flex: 0 0 auto;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top-color: rgba(255,255,255,0.12);
     }
     .p5em-capture-editor {
       margin-top: 10px;
@@ -3320,6 +4204,11 @@ function injectStyles() {
       gap: 10px;
       flex: 0 0 auto;
     }
+    .p5em-playlist-head > div {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
     .p5em-playlist-editor h2 {
       margin: 0 0 6px;
       color: rgba(255,255,255,0.58);
@@ -3329,10 +4218,12 @@ function injectStyles() {
       text-transform: uppercase;
     }
     .p5em-playlist-head button {
-      width: 26px;
+      width: auto;
+      min-width: 26px;
       height: 24px;
+      padding: 0 10px;
       line-height: 1;
-      font-size: 13px;
+      font-size: 10px;
     }
     .p5em-playlist-options {
       display: grid;
@@ -3342,12 +4233,25 @@ function injectStyles() {
       margin: 4px 0 8px;
     }
     .p5em-playlist-rows {
-      flex: 1 1 auto;
-      min-height: 0;
+      flex: 0 0 auto;
+      max-height: 220px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       gap: 7px;
+    }
+    .p5em-playlist-hash-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      flex: 0 0 auto;
+      max-height: 160px;
+      overflow: auto;
+    }
+    .p5em-playlist-subhead {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.12);
     }
     .p5em-playlist-row {
       display: grid;
@@ -3355,10 +4259,35 @@ function injectStyles() {
       gap: 7px;
       align-items: center;
     }
+    .p5em-playlist-hash-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto 26px;
+      gap: 7px;
+      align-items: center;
+    }
+    .p5em-specific-hash-section.is-disabled {
+      opacity: 0.38;
+      filter: grayscale(1);
+    }
+    .p5em-specific-hash-section.is-disabled .p5em-playlist-subhead {
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+    .p5em-specific-hash-section.is-disabled .p5em-playlist-hash-rows {
+      max-height: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .p5em-specific-hash-section.is-disabled .p5em-playlist-head h2::after {
+      content: " - collapsed while random hashes are on";
+      color: rgba(255,255,255,0.42);
+      font-weight: 400;
+    }
     .p5em-playlist-row[data-kind="url"] .p5em-drop-zone {
       display: none;
     }
     .p5em-playlist-row input[type="text"],
+    .p5em-playlist-hash-row input[type="text"],
     .p5em-playlist-row select {
       min-width: 0;
       padding: 7px 8px;
@@ -3368,7 +4297,8 @@ function injectStyles() {
       border-radius: 0;
       font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    .p5em-playlist-row button {
+    .p5em-playlist-row button,
+    .p5em-playlist-hash-row button {
       padding: 7px 8px;
       color: rgba(255,255,255,0.7);
       background: rgba(255,255,255,0.04);
@@ -3378,6 +4308,14 @@ function injectStyles() {
       letter-spacing: 0.12em;
       text-transform: uppercase;
       cursor: pointer;
+    }
+    .p5em-playlist-row button:disabled,
+    .p5em-playlist-hash-row button:disabled,
+    .p5em-playlist-hash-row input:disabled {
+      cursor: not-allowed;
+      color: rgba(255,255,255,0.34);
+      border-color: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.025);
     }
     .p5em-drop-zone {
       position: relative;
@@ -3509,7 +4447,7 @@ function injectStyles() {
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 7px;
+      gap: 6px;
       color: rgba(255,255,255,0.7);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
@@ -3523,8 +4461,8 @@ function injectStyles() {
     }
     .p5em-toggle i {
       position: relative;
-      width: 24px;
-      height: 13px;
+      width: 22px;
+      height: 12px;
       border: 1px solid rgba(255,255,255,0.24);
       background: rgba(255,255,255,0.035);
       flex: 0 0 auto;
@@ -3534,8 +4472,8 @@ function injectStyles() {
       position: absolute;
       top: 2px;
       left: 2px;
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       background: rgba(255,255,255,0.36);
       transition: transform 0.18s ease, background 0.18s ease;
     }
@@ -3544,13 +4482,13 @@ function injectStyles() {
       background: rgba(255,255,255,0.1);
     }
     .p5em-toggle input:checked + i::after {
-      transform: translateX(11px);
+      transform: translateX(10px);
       background: rgba(255,255,255,0.92);
     }
     .p5em-number-control input,
     .p5em-number-control select {
-      width: 64px;
-      padding: 6px 7px;
+      width: 58px;
+      padding: 5px 6px;
       color: rgba(255,255,255,0.9);
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.18);
@@ -3559,14 +4497,14 @@ function injectStyles() {
       text-align: right;
     }
     .p5em-panel-actions button {
-      padding: 7px 9px;
+      padding: 6px 8px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 9px;
       letter-spacing: 0.13em;
       text-transform: uppercase;
     }
     .p5em-panel-hint {
-      margin: 8px 0 0;
+      margin: 6px 0 0;
       flex: 0 0 auto;
       color: rgba(255,255,255,0.42);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -3693,6 +4631,45 @@ function writeRuntimeConfig(storageKey, config) {
   }
 }
 
+function defaultPlaylistStorageKey(storageKey) {
+  return `${storageKey || DEFAULTS.storageKey}-playlist-defaults`;
+}
+
+function readDefaultPlaylist(storageKey) {
+  try {
+    const raw = localStorage.getItem(defaultPlaylistStorageKey(storageKey));
+    if (!raw) return null;
+    const playlist = JSON.parse(raw);
+    return playlist && typeof playlist === "object"
+      ? {
+        ...DEFAULTS.playlist,
+        ...playlist,
+        items: normalizePlaylistItems(playlist.items || []),
+        hashes: normalizePlaylistHashes(playlist.hashes || []),
+        itemOrder: normalizePlaylistOrder(playlist.itemOrder),
+        hashOrder: normalizePlaylistOrder(playlist.hashOrder)
+      }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDefaultPlaylist(storageKey, playlist) {
+  try {
+    localStorage.setItem(defaultPlaylistStorageKey(storageKey), JSON.stringify({
+      ...DEFAULTS.playlist,
+      ...(playlist || {}),
+      items: normalizePlaylistItems(playlist?.items || []),
+      hashes: normalizePlaylistHashes(playlist?.hashes || []),
+      itemOrder: normalizePlaylistOrder(playlist?.itemOrder),
+      hashOrder: normalizePlaylistOrder(playlist?.hashOrder)
+    }));
+  } catch {
+    // Storage can be unavailable in private browsing or locked-down kiosk shells.
+  }
+}
+
 function readUrlRuntimeConfig(locationLike = window.location) {
   const params = new URLSearchParams(locationLike.search || "");
   if (!Array.from(params.keys()).some((key) => key.startsWith("p5em.") || URL_PARAM_ALIASES.has(key))) return null;
@@ -3729,6 +4706,12 @@ function readUrlRuntimeConfig(locationLike = window.location) {
   assignBooleanParam(params, next, "showText", "showFreeText");
   assignStringParam(params, next, "textPosition", "freeTextPosition");
   assignNumberParam(params, next, "textSize", "freeTextSize");
+  assignBooleanParam(params, next, "showHash", "showHashOverlay");
+  assignBooleanParam(params, next, "showHashOverlay", "showHashOverlay");
+  assignStringParam(params, next, "hashPosition", "hashOverlayPosition");
+  assignNumberParam(params, next, "hashSafeArea", "hashOverlaySafeArea");
+  assignNumberParam(params, next, "hashSize", "hashOverlaySize");
+  assignStringParam(params, next, "hashColor", "hashOverlayColor");
   assignStringParam(params, next, "layout", "overlayLayout");
   assignStringParam(params, next, "cardQr", "cardQrPlacement");
   assignNumberParam(params, next, "safeArea", "overlaySafeArea");
@@ -3736,6 +4719,8 @@ function readUrlRuntimeConfig(locationLike = window.location) {
   assignBooleanParam(params, next, "showQr", "showQr");
   assignStringParam(params, next, "qrPosition", "qrPosition");
   assignNumberParam(params, next, "qrSize", "qrSize");
+  assignCustomUrlParamsParam(params, next, "artworkParams", "customUrlParams");
+  assignCustomUrlParamsParam(params, next, "customParams", "customUrlParams");
   assignStringParam(params, next, "seed", "seed");
   assignBooleanParam(params, next, "monitor", "monitor");
   assignBooleanParam(params, accessibility, "reducedMotion", "reducedMotion");
@@ -3748,13 +4733,17 @@ function readUrlRuntimeConfig(locationLike = window.location) {
   assignBooleanParam(params, playlist, "playlistEnabled", "enabled");
   assignStringListParam(params, playlist, "urls", "items");
   assignStringListParam(params, playlist, "playlist", "items");
+  assignStringParam(params, playlist, "playlistOrder", "itemOrder");
   assignNumberParam(params, playlist, "playlistInterval", "intervalValue");
   assignStringParam(params, playlist, "playlistUnit", "intervalUnit");
+  assignStringListParam(params, playlist, "hashes", "hashes");
+  assignStringParam(params, playlist, "hashOrder", "hashOrder");
   assignBooleanParam(params, playlist, "randomHash", "randomHash");
   assignNumberParam(params, playlist, "hashInterval", "hashIntervalValue");
   assignStringParam(params, playlist, "hashUnit", "hashIntervalUnit");
   assignStringParam(params, playlist, "hashParam", "hashParam");
   assignNumberParam(params, playlist, "startIndex", "startIndex");
+  assignNumberParam(params, playlist, "startHashIndex", "startHashIndex");
 
   if (Object.keys(accessibility).length) next.accessibility = accessibility;
   if (Object.keys(watchdog).length) next.watchdog = watchdog;
@@ -3767,11 +4756,11 @@ function readUrlRuntimeConfig(locationLike = window.location) {
 }
 
 const URL_PARAM_ALIASES = new Set([
-  "artist", "cardQr", "context", "cursor", "cursorIdle", "cursorMode", "dpr", "freeText", "fullscreen",
-  "hashInterval", "hashParam", "hashUnit", "highContrast", "kiosk", "layout", "monitor", "panel",
-  "playlist", "playlistEnabled", "playlistInterval", "playlistUnit", "qr", "qrPosition", "qrSize",
+  "artist", "artworkParams", "cardQr", "context", "cursor", "cursorIdle", "cursorMode", "customParams", "dpr", "freeText", "fullscreen",
+  "hashColor", "hashes", "hashInterval", "hashOrder", "hashParam", "hashPosition", "hashSafeArea", "hashSize", "hashUnit", "highContrast", "kiosk", "layout", "monitor", "panel",
+  "playlist", "playlistEnabled", "playlistInterval", "playlistOrder", "playlistUnit", "qr", "qrPosition", "qrSize",
   "randomHash", "reducedMotion", "refreshOnRotation", "rotation", "safeArea", "scroll", "seed",
-  "showQr", "showText", "showTitle", "startIndex", "text", "textPosition", "textSize", "title",
+  "showHash", "showHashOverlay", "showQr", "showText", "showTitle", "startHashIndex", "startIndex", "text", "textPosition", "textSize", "title",
   "titleBold", "titleColor", "titleFont", "titleItalic", "titlePosition", "titleSize", "touch", "ui", "urls",
   "watchdog", "watchdogFps", "watchdogReload", "watchdogSeconds", "year"
 ]);
@@ -3802,6 +4791,12 @@ function assignStringListParam(params, target, name, key) {
   const value = paramValue(params, name);
   if (value === null) return;
   target[key] = value.split(/[|\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function assignCustomUrlParamsParam(params, target, name, key) {
+  const value = paramValue(params, name);
+  if (value === null) return;
+  target[key] = normalizeCustomUrlParams(value);
 }
 
 function parseBooleanParam(value) {
@@ -3844,6 +4839,11 @@ function serializeRuntimeConfig(config) {
     showFreeText: config.showFreeText,
     freeTextPosition: config.freeTextPosition,
     freeTextSize: config.freeTextSize,
+    showHashOverlay: config.showHashOverlay,
+    hashOverlayPosition: config.hashOverlayPosition,
+    hashOverlaySafeArea: config.hashOverlaySafeArea,
+    hashOverlaySize: config.hashOverlaySize,
+    hashOverlayColor: config.hashOverlayColor,
     overlayLayout: config.overlayLayout,
     cardQrPlacement: config.cardQrPlacement,
     overlaySafeArea: config.overlaySafeArea,
@@ -3875,6 +4875,7 @@ function serializeRuntimeConfig(config) {
     capture: { ...config.capture },
     localFiles: { ...config.localFiles },
     ui: { ...config.ui },
+    customUrlParams: normalizeCustomUrlParams(config.customUrlParams),
     urlParams: config.urlParams,
     playlist: Array.isArray(config.playlist) ? { ...DEFAULTS.playlist, enabled: true, items: config.playlist } : { ...config.playlist },
     persist: config.persist,
@@ -3910,6 +4911,20 @@ function positionOptions(selected = "top-left") {
     ["bottom-center", "Bottom Center"],
     ["bottom-right", "Bottom Right"]
   ].map(([value, label]) => `<option value="${value}"${normalizeOverlayPosition(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
+function hashPositionOptions(selected = "bottom-left") {
+  return [
+    ["bottom-left", "Bottom Left"],
+    ["bottom-right", "Bottom Right"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeHashOverlayPosition(selected) === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
+function hashColorOptions(selected = "white") {
+  return [
+    ["white", "White"],
+    ["black", "Black"]
+  ].map(([value, label]) => `<option value="${value}"${normalizeHashOverlayColor(selected) === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
 function overlayLayoutOptions(selected = "separate") {
@@ -3975,6 +4990,26 @@ function normalizeOverlaySafeArea(value) {
   return clamp(Number(value) || 0, 0, 160);
 }
 
+function normalizeHashOverlayPosition(value) {
+  return value === "bottom-right" ? "bottom-right" : "bottom-left";
+}
+
+function normalizeHashOverlaySafeArea(value) {
+  return clamp(Number(value) || 0, 0, 240);
+}
+
+function normalizeHashOverlaySize(value) {
+  return clamp(Number(value) || DEFAULTS.hashOverlaySize, 7, 24);
+}
+
+function normalizeHashOverlayColor(value) {
+  return value === "black" ? "black" : "white";
+}
+
+function captureHashColor(value) {
+  return normalizeHashOverlayColor(value) === "black" ? "rgba(0, 0, 0, 0.78)" : "rgba(255, 255, 255, 0.72)";
+}
+
 function normalizeTitleOverlaySize(value) {
   return clamp(Number(value) || DEFAULTS.titleOverlaySize, 8, 96);
 }
@@ -4001,13 +5036,16 @@ function findArtworkCanvas() {
 function findCanvasInDocument(doc) {
   if (!doc) return null;
   const canvases = Array.from(doc.querySelectorAll("canvas"));
-  return canvases.find((canvas) => {
-    if (!canvas || canvas.id === "p5em-capture-canvas") return false;
-    if (canvas.closest(`#${PANEL_ID}`)) return false;
-    const rect = canvas.getBoundingClientRect();
-    const style = doc.defaultView?.getComputedStyle(canvas) || window.getComputedStyle(canvas);
-    return rect.width > 2 && rect.height > 2 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-  }) || null;
+  return canvases.find((canvas) => isCapturableCanvas(canvas, doc)) || null;
+}
+
+function isCapturableCanvas(canvas, doc = canvas?.ownerDocument) {
+  if (!canvas || canvas.id === "p5em-capture-canvas") return false;
+  if (!canvas.isConnected) return false;
+  if (canvas.closest(`#${PANEL_ID}`)) return false;
+  const rect = canvas.getBoundingClientRect();
+  const style = doc?.defaultView?.getComputedStyle(canvas) || window.getComputedStyle(canvas);
+  return rect.width > 2 && rect.height > 2 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
 }
 
 function capturePosition(position, width, height, frameWidth, frameHeight) {
@@ -4020,6 +5058,13 @@ function capturePosition(position, width, height, frameWidth, frameHeight) {
   if (position.endsWith("right")) x = frameWidth - width - inset;
   if (position.startsWith("bottom")) y = frameHeight - height - inset;
   return [Math.max(inset, x), Math.max(inset, y)];
+}
+
+function captureHashPosition(position, width, height, frameWidth, frameHeight, inset) {
+  const safe = normalizeHashOverlaySafeArea(inset);
+  const x = position.endsWith("right") ? frameWidth - width - safe : safe;
+  const y = frameHeight - height - safe;
+  return [Math.max(safe, x), Math.max(safe, y)];
 }
 
 function captureTextColor(value) {
@@ -4045,19 +5090,25 @@ function captureFontFamily(value) {
 }
 
 function wrapCaptureText(ctx, text, maxWidth) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
-  words.forEach((word) => {
-    const next = line ? `${line} ${word}` : word;
-    if (line && ctx.measureText(next).width > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = next;
+  String(text || "").split(/\r?\n/).forEach((rawLine) => {
+    const words = rawLine.split(/[ \t]+/).filter(Boolean);
+    if (!words.length) {
+      lines.push("");
+      return;
     }
+    let line = "";
+    words.forEach((word) => {
+      const next = line ? `${line} ${word}` : word;
+      if (line && ctx.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    });
+    if (line) lines.push(line);
   });
-  if (line) lines.push(line);
   return lines.length ? lines : [""];
 }
 
@@ -4091,6 +5142,11 @@ function waitForVideoFrame(video, timeoutMs = 1000) {
 function readUrlHash(url, hashParam = "hash") {
   if (!url) return "";
   return url.searchParams.get(hashParam) || "";
+}
+
+function currentDisplayHash() {
+  return String(window.__p5emCurrentHash || document.documentElement.dataset.p5emHash || "").trim()
+    || String(window.tokenData?.hash || window.fxhash || "").trim();
 }
 
 function safeUrl(value) {
@@ -4153,18 +5209,22 @@ function captureMimeCandidates(codec = "auto") {
     "video/webm;codecs=vp8,opus"
   ];
   const webm = ["video/webm"];
-  if (codec === "h264") return h264;
+  if (codec === "h264" || codec === "mp4") return h264;
   if (codec === "vp9") return vp9;
   if (codec === "vp8") return vp8;
   if (codec === "webm") return webm;
   if (codec === "default") return [];
-  return [...vp9, ...vp8, ...webm, ...h264];
+  return [...webm, ...vp9, ...vp8, ...h264];
 }
 
 function captureFilename(name, mimeType = "video/webm") {
   const base = safeName(name || DEFAULTS.capture.filename) || DEFAULTS.capture.filename;
   const extension = /mp4/i.test(mimeType) ? "mp4" : "webm";
   return base.endsWith(`.${extension}`) ? base : `${base}.${extension}`;
+}
+
+function isUnsafeCaptureDirectoryName(name) {
+  return String(name || "").trim().toLowerCase() === "desktop";
 }
 
 function downloadBlob(blob, filename) {
@@ -4211,18 +5271,15 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
-function buildPlaylistUrl(input, playlist) {
+function buildPlaylistUrl(input, playlist, explicitHash = "") {
   const item = typeof input === "string" ? { url: input } : input;
-  let url = item.url || "";
+  let url = applyCustomUrlParams(item.url || "", playlist.customUrlParams);
   const randomHash = item.randomHash ?? playlist.randomHash;
   const hashParam = item.hashParam || playlist.hashParam || "hash";
-  if (!randomHash) return url;
+  const value = normalizePlaylistHash(explicitHash) || (randomHash ? randomHashValue() : "");
+  if (!value) return url;
 
-  const value = randomHashValue();
-  const [base, fragment] = url.split("#");
-  const separator = base.includes("?") ? "&" : "?";
-  const nextBase = `${base}${separator}${encodeURIComponent(hashParam)}=${encodeURIComponent(value)}`;
-  return fragment === undefined ? nextBase : `${nextBase}#${fragment}`;
+  return applyCustomUrlParams(url, [{ name: hashParam, value }]);
 }
 
 function parsePlaylistText(value) {
@@ -4252,8 +5309,76 @@ function normalizePlaylistItems(items) {
     .filter(Boolean);
 }
 
+function normalizeCustomUrlParams(params) {
+  if (typeof params === "string") {
+    return params.split(/[|\n,]/).map((line) => line.trim()).filter(Boolean).map((line) => {
+      const [name, ...rest] = line.split("=");
+      return { name, value: rest.join("=") };
+    }).filter((param) => normalizeUrlParamName(param.name));
+  }
+  if (!Array.isArray(params)) return [];
+  return params
+    .map((param) => {
+      if (Array.isArray(param)) return { name: normalizeUrlParamName(param[0]), value: normalizeUrlParamValue(param[1]) };
+      if (param && typeof param === "object") return { name: normalizeUrlParamName(param.name), value: normalizeUrlParamValue(param.value) };
+      return null;
+    })
+    .filter((param) => param?.name);
+}
+
+function normalizeUrlParamName(value) {
+  return String(value || "").trim().replace(/^[?&]+/, "");
+}
+
+function normalizeUrlParamValue(value) {
+  return String(value ?? "").trim();
+}
+
+function applyCustomUrlParams(url, params) {
+  const entries = normalizeCustomUrlParams(params);
+  if (!entries.length) return url;
+  const [baseWithQuery, fragment] = String(url || "").split("#");
+  const [base, query = ""] = baseWithQuery.split("?");
+  const search = new URLSearchParams(query);
+  entries.forEach(({ name, value }) => {
+    if (name) search.set(name, value);
+  });
+  const nextBase = search.toString() ? `${base}?${search.toString()}` : base;
+  return fragment === undefined ? nextBase : `${nextBase}#${fragment}`;
+}
+
+function normalizePlaylistHashes(hashes) {
+  const list = typeof hashes === "string" ? parsePlaylistText(hashes) : hashes;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((hash) => normalizePlaylistHash(hash))
+    .filter(Boolean);
+}
+
+function normalizePlaylistHash(value) {
+  const hash = String(value || "").trim();
+  if (!hash) return "";
+  if (/^[0-9a-fA-F]{64}$/.test(hash)) return `0x${hash.toLowerCase()}`;
+  if (/^0x[0-9a-fA-F]{40,64}$/.test(hash)) return hash.toLowerCase().padEnd(66, "0");
+  return hash;
+}
+
+function normalizePlaylistOrder(value) {
+  return value === "random" ? "random" : "loop";
+}
+
+function nextOrderedIndex(current, count, order = "loop") {
+  if (count <= 1) return 0;
+  if (normalizePlaylistOrder(order) === "random") {
+    const next = Math.floor(Math.random() * count);
+    return next === current ? (next + 1) % count : next;
+  }
+  return (current + 1) % count;
+}
+
 function isTemporaryBlobUrl(value) {
-  return /^blob:/i.test(String(value || "").trim());
+  const text = String(value || "").trim();
+  return /^blob:/i.test(text) || /^\[temporary preview\]/i.test(text);
 }
 
 function randomHashValue() {

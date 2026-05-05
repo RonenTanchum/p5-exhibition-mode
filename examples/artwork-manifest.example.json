@@ -19,7 +19,11 @@
     "hardware": ["Mac mini or equivalent", "HDMI display"],
     "network": "Optional after initial load",
     "startup": "Open demo/index.html and click once for fullscreen",
-    "maintenance": "Use Shift + G to inspect runtime status"
+    "maintenance": "Use Shift + G to inspect runtime status",
+    "playlist": "Local helper playlist with optional remote URL mirror",
+    "artworkUrlParams": ["ui=false"],
+    "hashMode": "Random hash for exploration, fixed hashes for curated sequences",
+    "capture": "Direct canvas capture at browser window size; convert with FFmpeg only for delivery formats"
   },
   "provenance": ["Phenomena Labs runtime demo"],
   "rights": {

@@ -13,6 +13,11 @@ export type ExhibitionModeOptions = {
   showFreeText?: boolean;
   freeTextPosition?: ExhibitionOverlayPosition;
   freeTextSize?: number;
+  showHashOverlay?: boolean;
+  hashOverlayPosition?: ExhibitionHashOverlayPosition;
+  hashOverlaySafeArea?: number;
+  hashOverlaySize?: number;
+  hashOverlayColor?: ExhibitionHashOverlayColor;
   overlayLayout?: ExhibitionOverlayLayout;
   cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
@@ -44,6 +49,7 @@ export type ExhibitionModeOptions = {
   capture?: ExhibitionCaptureOptions;
   localFiles?: ExhibitionLocalFilesOptions;
   ui?: ExhibitionUiOptions;
+  customUrlParams?: ExhibitionCustomUrlParam[];
   urlParams?: boolean;
   playlist?: ExhibitionPlaylistOptions | Array<string | ExhibitionPlaylistItem>;
   persist?: boolean;
@@ -81,6 +87,11 @@ export type ExhibitionArtworkMetadataOptions = {
   showFreeText?: boolean;
   freeTextPosition?: ExhibitionOverlayPosition;
   freeTextSize?: number;
+  showHashOverlay?: boolean;
+  hashOverlayPosition?: ExhibitionHashOverlayPosition;
+  hashOverlaySafeArea?: number;
+  hashOverlaySize?: number;
+  hashOverlayColor?: ExhibitionHashOverlayColor;
   overlayLayout?: ExhibitionOverlayLayout;
   cardQrPlacement?: ExhibitionCardQrPlacement;
   overlaySafeArea?: number;
@@ -88,6 +99,8 @@ export type ExhibitionArtworkMetadataOptions = {
 
 export type ExhibitionOverlayLayout = "separate" | "card";
 export type ExhibitionCardQrPlacement = "below" | "above" | "right" | "left";
+export type ExhibitionHashOverlayPosition = "bottom-left" | "bottom-right";
+export type ExhibitionHashOverlayColor = "white" | "black";
 
 export type ExhibitionTitleOverlayFont =
   | "mono"
@@ -148,7 +161,7 @@ export type ExhibitionHealthCheckOptions = {
 
 export type ExhibitionCaptureOptions = {
   filename?: string;
-  source?: "auto" | "canvas" | "screen";
+  source?: "auto" | "canvas";
   codec?: "auto" | "h264" | "vp9" | "vp8" | "webm" | "default" | string;
   videoBitsPerSecond?: number;
   frameRate?: number;
@@ -159,6 +172,7 @@ export type ExhibitionCaptureOptions = {
 export type ExhibitionLocalFilesOptions = {
   endpoint?: string;
   absolutePrefix?: string;
+  urlMirrorRoot?: string;
   fallbackFilePreview?: boolean;
 };
 
@@ -181,15 +195,26 @@ export type ExhibitionPlaylistItem = {
 export type ExhibitionPlaylistOptions = {
   enabled?: boolean;
   items?: Array<string | ExhibitionPlaylistItem>;
+  itemOrder?: ExhibitionPlaylistOrder;
   intervalValue?: number;
   intervalSeconds?: number;
   intervalUnit?: "seconds" | "minutes" | "hours";
+  hashes?: string[];
+  hashOrder?: ExhibitionPlaylistOrder;
   hashIntervalValue?: number;
   hashIntervalSeconds?: number;
   hashIntervalUnit?: "seconds" | "minutes" | "hours";
   randomHash?: boolean;
   hashParam?: string;
   startIndex?: number;
+  startHashIndex?: number;
+};
+
+export type ExhibitionPlaylistOrder = "loop" | "random";
+
+export type ExhibitionCustomUrlParam = {
+  name: string;
+  value?: string | number | boolean;
 };
 
 export type ExhibitionLogEntry = {
@@ -214,6 +239,11 @@ export type ExhibitionDiagnostics = {
   freeTextVisible: boolean;
   freeTextPosition: ExhibitionOverlayPosition;
   freeTextSize: number;
+  hashOverlayVisible: boolean;
+  hashOverlayPosition: ExhibitionHashOverlayPosition;
+  hashOverlaySafeArea: number;
+  hashOverlaySize: number;
+  hashOverlayColor: ExhibitionHashOverlayColor;
   overlayLayout: ExhibitionOverlayLayout;
   cardQrPlacement: ExhibitionCardQrPlacement;
   overlaySafeArea: number;
@@ -225,6 +255,7 @@ export type ExhibitionDiagnostics = {
   currentSource: string;
   hashRecording: boolean;
   hashRecordCount: number;
+  customUrlParams: ExhibitionCustomUrlParam[];
   seed: string | number | null;
   uptimeSeconds: number;
   fps: number;
@@ -249,6 +280,8 @@ export type ExhibitionDiagnostics = {
   playlistEnabled: boolean;
   playlistIndex: number;
   playlistCount: number;
+  playlistHashIndex: number;
+  playlistHashCount: number;
   playlistIntervalSeconds: number;
   playlistIntervalUnit: "seconds" | "minutes" | "hours";
   playlistHashIntervalSeconds: number;
@@ -296,6 +329,12 @@ export type ExhibitionMode = {
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
   setPlaylistOptions: (options: ExhibitionPlaylistOptions) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
+  setPlaylistHashes: (hashes: string | string[]) => ExhibitionMode;
+  setCustomUrlParams: (params: ExhibitionCustomUrlParam[]) => ExhibitionMode;
+  restoreDefaultPlaylist: () => ExhibitionMode;
+  saveDefaultPlaylist: () => ExhibitionMode;
+  loadLocalFolderPlaylist: (rootPath?: string) => Promise<ExhibitionMode>;
+  loadServedPlaylist: (rootPath?: string) => Promise<ExhibitionMode>;
   previewPlaylistUrl: (url: string) => string | null;
   clearLogs: () => ExhibitionMode;
   startCapture: (options?: ExhibitionCaptureOptions) => Promise<ExhibitionMode>;

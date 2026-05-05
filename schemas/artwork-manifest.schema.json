@@ -36,7 +36,11 @@
         "hardware": { "type": "array", "items": { "type": "string" } },
         "network": { "type": "string" },
         "startup": { "type": "string" },
-        "maintenance": { "type": "string" }
+        "maintenance": { "type": "string" },
+        "playlist": { "type": "string" },
+        "artworkUrlParams": { "type": "array", "items": { "type": "string" } },
+        "hashMode": { "type": "string" },
+        "capture": { "type": "string" }
       }
     },
     "provenance": {

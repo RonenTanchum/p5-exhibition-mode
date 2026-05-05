@@ -1,3 +1,6 @@
+// p5 Exhibition Mode
+// Developed @ Phenomena Labs. Open source with credit; donations: info@phenomenalabs.com or phenomenalabs.eth.
+
 const DEFAULTS = {
   title: "Untitled Artwork",
   artist: "",
@@ -2669,7 +2672,7 @@ function createPanel(config, api) {
       <button type="button" data-action="playlist-next">Next URL</button>
       <input data-input="runtime-config-file" type="file" accept="application/json,.json" hidden>
     </div>
-    <p class="p5em-panel-hint">Shift + ${config.panelKey.toUpperCase()} toggles this panel.</p>
+    <p class="p5em-panel-hint">Shift + ${config.panelKey.toUpperCase()} toggles this panel. Developed @ Phenomena Labs. Open source with credit; donations: info@phenomenalabs.com or phenomenalabs.eth.</p>
   `;
   installPanelDrag(panel);
   panel.addEventListener("pointerdown", (event) => event.stopPropagation());

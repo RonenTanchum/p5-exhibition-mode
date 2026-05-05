@@ -1,5 +1,25 @@
 import { createExhibitionMode } from "../src/index.js";
 
+const localArtworkUrls = [
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Apex/index.html",
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/EternalTides/index.html",
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html",
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/ClassicalRevival/index.html",
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Rococo/index.html",
+  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Dio/index.html"
+];
+
+const publicArtworkUrls = [
+  "https://art.phenomenalabs.com/Apex/index.html",
+  "https://art.phenomenalabs.com/EternalTides/index.html",
+  "https://art.phenomenalabs.com/Longing/index.html",
+  "https://art.phenomenalabs.com/ClassicalRevival/index.html",
+  "https://art.phenomenalabs.com/Rococo/index.html",
+  "https://art.phenomenalabs.com/Dio/index.html"
+];
+
+const isLocalHelper = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+
 const exhibition = createExhibitionMode({
   title: "Field Study",
   artist: "Phenomena Labs",
@@ -17,7 +37,7 @@ const exhibition = createExhibitionMode({
     { name: "ui", value: "false" }
   ],
   playlist: {
-    enabled: true,
+    enabled: isLocalHelper,
     intervalValue: 20,
     intervalUnit: "seconds",
     intervalSeconds: 20,
@@ -26,14 +46,7 @@ const exhibition = createExhibitionMode({
     hashIntervalSeconds: 20,
     randomHash: true,
     hashParam: "hash",
-    items: [
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Apex/index.html",
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/EternalTides/index.html",
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html",
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/ClassicalRevival/index.html",
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Rococo/index.html",
-      "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Dio/index.html"
-    ]
+    items: isLocalHelper ? localArtworkUrls : publicArtworkUrls
   }
 });
 

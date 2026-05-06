@@ -28,23 +28,37 @@ The runtime panel is hidden until you need it. Press `Shift + G` to open it.
 
 The screenshots below use made-up content and a synthetic artwork background. They show the control surface, not a bundled artwork.
 
+For a practical show-prep workflow, see [docs/exhibition-setup-guide.md](docs/exhibition-setup-guide.md). AI agents can also read [llms.txt](llms.txt) for a concise setup map.
+
 ### Runtime
 
 ![Runtime tab with artwork URL params](docs/assets/panel-runtime-url-params.png)
 
-The Runtime tab is for installation settings: fullscreen, kiosk locks, cursor behavior, display rotation, watchdog settings, diagnostics, and artwork URL params. URL params are useful when a work needs display flags that are not the seed hash, for example `ui=false` or `quality=gallery`.
+The Runtime tab is for installation settings: fullscreen, kiosk locks, cursor behavior, display rotation, watchdog settings, diagnostics, hash recording, and artwork URL params.
+
+Use this tab when the screen or browser needs to behave like exhibition hardware. URL params are useful when a work needs display flags that are not the seed hash, for example `ui=false` or `quality=gallery`. These params are applied to every loaded artwork before the hash.
 
 ### Overlay
 
 ![Overlay tab with title, free text, QR, and hash controls](docs/assets/panel-overlay.png)
 
-The Overlay tab controls the exhibition label layer. You can show a title, artist, year, free text, QR code, and a small hash overlay. Floating overlays automatically stack when they share the same position, so title, text, and QR do not collide. Free text preserves line breaks from the textarea.
+The Overlay tab controls the exhibition label layer. You can show a title, artist, year, free text, QR code, and a small hash overlay.
+
+The first subtab edits **Global Text**, which is the fallback label for the whole runtime. The second subtab, **Per Playlist Item**, lets each playlist URL or local path carry its own title, artist, year, and short wall text. Empty per-item fields fall back to the global fields.
+
+![Overlay tab with compact per-playlist item metadata controls](docs/assets/panel-overlay-playlist-metadata.png)
+
+The per-item editor stays compact by default: choose a playlist item, review its effective label, move to the previous/next item, or add a new row. Open **Edit Item Text** only when you need to change that item's title, artist, year, or wall text.
+
+Floating overlays automatically stack when they share the same position, so title, text, and QR do not collide. Card mode groups title, text, artist/year, and QR into one compact wall-label block.
 
 ### Playlist
 
 ![Playlist tab with artwork rows and specific hashes](docs/assets/panel-playlist.png)
 
-The Playlist tab separates artwork URLs/local paths from hash playback. Artwork order can loop or randomize. Hash order can also loop or randomize. If random hashes are enabled, the specific-hash section collapses and the runtime generates fresh `0x...` hashes instead.
+The Playlist tab separates artwork URLs/local paths from hash playback. Artwork order can loop or randomize. Hash order can also loop or randomize.
+
+Use playlist rows for the pages being shown. Use the hash playlist for the generated states being shown. If random hashes are enabled, the specific-hash section collapses and the runtime generates fresh `0x...` hashes instead. Your curated hash list stays saved and becomes active again when random mode is turned off.
 
 ## Install
 
@@ -151,8 +165,19 @@ const exhibition = createExhibitionMode({
     intervalValue: 3,
     intervalUnit: "minutes",
     items: [
-      "./works/apex/index.html",
-      "https://art.phenomenalabs.com/ClassicalRevival/index.html"
+      {
+        url: "./works/apex/index.html",
+        title: "Apex",
+        artist: "Phenomena Labs",
+        year: "2026",
+        freeText: "Live generative landscape for the main display."
+      },
+      {
+        url: "https://art.phenomenalabs.com/ClassicalRevival/index.html",
+        title: "Classical Revival",
+        artist: "Ronen Tanchum",
+        year: "2026"
+      }
     ],
     randomHash: false,
     hashOrder: "loop",
@@ -166,6 +191,20 @@ const exhibition = createExhibitionMode({
   }
 });
 ```
+
+Playlist items may be plain URL strings or objects. Object items can carry their own overlay text:
+
+```js
+{
+  url: "./works/spring/index.html",
+  title: "Spring",
+  artist: "Phenomena Labs",
+  year: "2026",
+  freeText: "Short wall-label text for this specific playlist entry."
+}
+```
+
+When a playlist item has `title`, `artist`, `year`, or `freeText`, those values override the global Overlay tab text only while that item is playing. Empty item fields fall back to the global overlay fields. In the panel, open **Overlay → Per Playlist Item** to edit this text per playlist URL/local path.
 
 For continuous random exploration:
 
@@ -251,6 +290,8 @@ Custom params are applied before the hash. If the artwork URL already contains t
 
 ## Capture
 
+![Capture tab with codec, bitrate, FPS, and recording controls](docs/assets/panel-capture.png)
+
 The Capture tab records the artwork canvas and overlay layout directly at the current browser window size. It does not request screen capture, include browser chrome, or force fullscreen. Resize the browser to choose the output framing.
 
 The default target is H.264 MP4 when the browser supports it. If the browser rejects H.264, the runtime falls back to the browser's available recorder format and reports the actual output type. WebM is still the safest long-recording fallback.
@@ -275,7 +316,7 @@ Official FFmpeg downloads are listed at <https://www.ffmpeg.org/download.html>. 
 The panel includes:
 
 - **Runtime:** fullscreen, kiosk locks, cursor, rotation, watchdog, diagnostics, and artwork URL params
-- **Overlay:** title, free text, QR, hash overlay, safe border, font, and card/floating layout
+- **Overlay:** global title text, per-playlist item text, QR, hash overlay, safe border, font, and card/floating layout
 - **Playlist:** artwork URLs/local paths, specific hashes, random hashes, loop/random order, and intervals
 - **Capture:** direct canvas stills and video recording
 - **Log:** runtime messages, warnings, browser errors, playlist events, and capture status
@@ -342,6 +383,7 @@ Useful methods:
 - `setOverlayLayout("separate" | "card")`
 - `setWatchdog(options)`, `setHealthCheck(options)`
 - `setPlaylistOptions(options)`, `setPlaylistItems(items)`, `setPlaylistHashes(hashes)`
+- `setPlaylistItemMetadata(index, { title, artist, year, freeText })`
 - `setCustomUrlParams(params)`
 - `setPlaylistIntervalParts(value, unit)`, `setPlaylistHashIntervalParts(value, unit)`
 - `nextPlaylistItem()`, `previousPlaylistItem()`, `previewPlaylistUrl(url)`
@@ -490,6 +532,8 @@ createExhibitionMode({
   },
   playlist: {
     enabled: false,
+    // Each item can be a URL string or an object with per-item overlay text:
+    // { url, title, artist, year, freeText, randomHash, hashParam }
     items: [],
     itemOrder: "loop",
     intervalValue: 2,

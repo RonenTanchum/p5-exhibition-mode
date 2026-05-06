@@ -1,21 +1,53 @@
 import { createExhibitionMode } from "../src/index.js";
 
 const localArtworkUrls = [
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Apex/index.html",
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/EternalTides/index.html",
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html",
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/ClassicalRevival/index.html",
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Rococo/index.html",
-  "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Dio/index.html"
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Apex/index.html",
+    title: "Apex",
+    artist: "Phenomena Labs",
+    year: "2026",
+    freeText: "A local mirrored artwork with its own exhibition label."
+  },
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/EternalTides/index.html",
+    title: "Eternal Tides",
+    artist: "Phenomena Labs",
+    year: "2026",
+    freeText: "Playlist entries can carry different wall text and QR context."
+  },
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Longing/index.html",
+    title: "Longing",
+    artist: "Phenomena Labs",
+    year: "2026"
+  },
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/ClassicalRevival/index.html",
+    title: "Classical Revival",
+    artist: "Ronen Tanchum",
+    year: "2026"
+  },
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Rococo/index.html",
+    title: "Rococo",
+    artist: "Ronen Tanchum",
+    year: "2026"
+  },
+  {
+    url: "/Users/phenomenalabs/Projects/art.phenomenalabs.com/Dio/index.html",
+    title: "Dio",
+    artist: "Phenomena Labs",
+    year: "2026"
+  }
 ];
 
 const publicArtworkUrls = [
-  "https://art.phenomenalabs.com/Apex/index.html",
-  "https://art.phenomenalabs.com/EternalTides/index.html",
-  "https://art.phenomenalabs.com/Longing/index.html",
-  "https://art.phenomenalabs.com/ClassicalRevival/index.html",
-  "https://art.phenomenalabs.com/Rococo/index.html",
-  "https://art.phenomenalabs.com/Dio/index.html"
+  { ...localArtworkUrls[0], url: "https://art.phenomenalabs.com/Apex/index.html" },
+  { ...localArtworkUrls[1], url: "https://art.phenomenalabs.com/EternalTides/index.html" },
+  { ...localArtworkUrls[2], url: "https://art.phenomenalabs.com/Longing/index.html" },
+  { ...localArtworkUrls[3], url: "https://art.phenomenalabs.com/ClassicalRevival/index.html" },
+  { ...localArtworkUrls[4], url: "https://art.phenomenalabs.com/Rococo/index.html" },
+  { ...localArtworkUrls[5], url: "https://art.phenomenalabs.com/Dio/index.html" }
 ];
 
 const isLocalHelper = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";

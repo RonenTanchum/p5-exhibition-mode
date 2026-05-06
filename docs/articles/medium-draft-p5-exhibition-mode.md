@@ -33,6 +33,7 @@ The tool wraps a p5.js sketch with exhibition controls:
 - Runtime diagnostics for FPS, resolution, memory, uptime, watchdogs, and logs
 - Floating title, free text, hash, and QR overlays
 - Automatic stacking when title, text, and QR share the same screen position
+- Per-playlist title, artist, year, and free-text labels
 - A playlist system for local paths and remote artwork URLs
 - A separate hash playlist for curated hashes
 - Random hash generation for exploration
@@ -49,12 +50,22 @@ The interface is intentionally practical. It is not a portfolio page and not a C
 The runtime panel opens with `Shift + G`. It is divided into tabs:
 
 - Runtime: status, input locks, rotation, custom URL parameters, and hash recording
-- Overlay: title, free text, QR, hash overlay, typography, safe areas, and card mode
+- Overlay: global labels, per-playlist item labels, QR, hash overlay, typography, safe areas, and card mode
 - Playlist: artwork URLs/local paths, specific hashes, random hash mode, and intervals
 - Capture: recording source, codec, bitrate, FPS, and file naming
 - Log: runtime events and warnings
 
+Suggested screenshots for publication:
+
+- `docs/assets/panel-runtime-url-params.png` — runtime controls and URL parameters
+- `docs/assets/panel-overlay.png` — global overlay typography, QR, and layout controls
+- `docs/assets/panel-overlay-playlist-metadata.png` — compact per-playlist item label editor
+- `docs/assets/panel-playlist.png` — artwork rows and hash playlist
+- `docs/assets/panel-capture.png` — direct canvas recording controls
+
 This matters because the person operating the installation should not have to edit code to adjust a QR code, hide an artwork's internal UI, rotate the display, or move through a list of hashes.
+
+It also matters when one screen rotates through several works. A playlist is rarely only a list of URLs. Each work may need its own title, year, artist credit, short description, and project link. The Overlay tab therefore has two modes: a global fallback label for the whole runtime, and per-playlist item labels for the specific artwork currently playing. Empty item fields fall back to the global label, so the operator can keep the setup concise when several works share the same artist or context.
 
 For example, a generative project might expose its own interface by default. In a gallery, the work should load as:
 
@@ -111,6 +122,7 @@ The tool is useful when:
 - a work needs to run as a kiosk
 - a local playlist of HTML folders needs to rotate
 - a live project needs its UI hidden by URL parameter
+- each artwork in a playlist needs its own wall-label text
 - a curated hash list needs to be presented
 - random hashes need to be explored or recorded
 - a title/QR label needs to sit on top of the artwork
@@ -119,6 +131,8 @@ The tool is useful when:
 - the installation needs a repeatable saved configuration
 
 It is also useful during development because it makes exhibition assumptions visible early.
+
+There is also an `llms.txt` file for AI agents. The point is not to make the artwork autonomous. It is to make the installation layer legible: what files matter, how to configure a show, what defaults are appropriate, how to use playlist metadata, and what to test before opening. If an assistant is helping prepare a screen-based exhibition, it can read the repository like an installation manual rather than guessing from the source code.
 
 ## A Small Layer, Not a Framework
 
@@ -135,4 +149,3 @@ The included local helper server exists for one reason: browsers cannot safely r
 It is a modest tool, but the problem it addresses is real. Generative art does not only need code that produces images. It also needs code that survives display conditions.
 
 The exhibition runtime is where those two realities meet.
-

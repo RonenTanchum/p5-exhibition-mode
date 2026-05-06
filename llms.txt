@@ -1,0 +1,180 @@
+# p5 Exhibition Mode
+
+`p5-exhibition-mode` is an open-source runtime layer for installing p5.js and browser-based generative artworks on exhibition screens. It helps artists, studios, curators, technicians, collectors, and AI agents prepare generative artworks for public display without rewriting the artwork itself.
+
+Repository: https://github.com/RonenTanchum/p5-exhibition-mode
+
+## What This Project Is
+
+This project provides a JavaScript runtime and local helper tools for showing browser artworks in real exhibition conditions. It is intended for gallery monitors, projectors, public screens, collector displays, art fair booths, institutional media walls, lobby displays, and studio preview machines.
+
+The tool handles the operational layer around a generative artwork:
+
+- fullscreen and kiosk behavior
+- context-menu, scroll, touch, and cursor locks
+- display rotation
+- device pixel ratio limits
+- title, artist, year, free text, QR, and hash overlays
+- per-playlist artwork label text
+- playlists of local or remote artwork URLs
+- curated hash lists and random hash generation
+- custom artwork URL parameters such as `ui=false`
+- runtime diagnostics and logs
+- direct still and video capture
+- JSON save/load for repeatable exhibition configurations
+
+It does not replace p5.js, the artwork, or the artist's own generative system. It wraps the artwork with exhibition controls.
+
+## Primary Files
+
+- `src/index.js`: main runtime implementation.
+- `src/index.d.ts`: TypeScript declarations for the runtime API.
+- `demo/index.html`: browser demo shell.
+- `demo/sketch.js`: p5 demo showing runtime setup, playlist use, and local/remote artwork lists.
+- `bin/exhibition-helper.mjs`: local helper server for serving local artwork folders.
+- `bin/capture-helper.mjs`: local capture conversion helper.
+- `README.md`: package overview and API documentation.
+- `docs/exhibition-setup-guide.md`: practical exhibition setup guide.
+- `docs/articles/medium-draft-p5-exhibition-mode.md`: long-form article draft explaining the tool.
+- `examples/runtime-config.example.json`: example saved runtime configuration.
+- `examples/artwork-manifest.example.json`: example artwork manifest.
+- `templates/technical-rider.md`: technical rider template for exhibitions.
+
+## How An AI Agent Should Use It
+
+If asked to prepare a show for generative artworks:
+
+1. Identify whether the exhibition is a single artwork, a playlist of artworks, a curated hash sequence, or random hash exploration.
+2. Add `createExhibitionMode()` to the artwork shell.
+3. Configure fullscreen, kiosk, input locks, pixel ratio, and rotation.
+4. Add overlay metadata: title, artist, year, free text, QR link, and optional hash overlay.
+5. If there is a playlist, use object items when each artwork needs its own label:
+
+```js
+playlist: {
+  enabled: true,
+  items: [
+    {
+      url: "./Apex/index.html",
+      title: "Apex",
+      artist: "Phenomena Labs",
+      year: "2026",
+      freeText: "Short wall-label text for this playlist entry."
+    },
+    {
+      url: "./Rococo/index.html",
+      title: "Rococo",
+      artist: "Ronen Tanchum",
+      year: "2026"
+    }
+  ]
+}
+```
+
+6. Add `customUrlParams` for artwork-specific display flags:
+
+```js
+customUrlParams: [
+  { name: "ui", value: "false" },
+  { name: "quality", value: "gallery" }
+]
+```
+
+7. Use curated `hashes` when exact generated states are required, or `randomHash: true` when the work should continuously discover new states.
+8. Save the runtime JSON once the installation settings are correct.
+9. Test at the real display size and orientation.
+10. Capture stills or video only after the artwork, overlay, QR, and safe areas are correct.
+
+## Important API Entry Point
+
+```js
+import { createExhibitionMode } from "p5-exhibition-mode";
+
+const exhibition = createExhibitionMode({
+  title: "Spring",
+  artist: "Phenomena Labs",
+  year: "2026",
+  fullscreen: true,
+  kiosk: true,
+  maxPixelRatio: 2,
+  showTitleOverlay: true,
+  showQr: true,
+  qrLink: "https://phenomenalabs.art/spring"
+});
+```
+
+In p5:
+
+```js
+function setup() {
+  exhibition.setup();
+  exhibition.applyPixelRatio();
+  createCanvas(windowWidth, windowHeight);
+}
+
+function draw() {
+  exhibition.tick();
+}
+```
+
+Open the runtime panel with `Shift + G`.
+
+## Human UI Sections
+
+- Runtime: installation status, fullscreen, input locks, rotation, custom URL params, hash recording.
+- Overlay: title, artist, year, free text, QR, hash overlay, card/separate layout, typography, safe borders, per-playlist item metadata.
+- Playlist: local paths, remote URLs, local folder loading, intervals, loop/random order.
+- Hash Playlist: curated hashes, random hash mode, hash interval, hash parameter name.
+- Capture: still capture, video recording, codec, bitrate, FPS, output filename, optional panel hiding.
+- Log: runtime warnings, browser errors, playlist events, capture status.
+
+## Local Exhibition Helper
+
+Use the local helper when loading folders from disk:
+
+```bash
+npx p5-exhibition-helper --root /Users/you/Artworks --port 4177
+```
+
+Open:
+
+```txt
+http://127.0.0.1:4177/
+```
+
+This solves browser local-file restrictions and helps same-origin capture.
+
+## Recommended Exhibition Defaults
+
+```js
+createExhibitionMode({
+  fullscreen: true,
+  kiosk: true,
+  disableContextMenu: true,
+  disableTouchGestures: true,
+  preventScroll: true,
+  hideCursor: true,
+  hideCursorMode: "idle",
+  cursorIdleMs: 3000,
+  maxPixelRatio: 2,
+  watchdog: {
+    enabled: true,
+    minFps: 12,
+    seconds: 30,
+    reload: true
+  }
+});
+```
+
+## Best Practices
+
+- Keep artwork logic separate from exhibition logic.
+- Use URL params for display flags, not for hardcoded installation behavior.
+- Use playlist item metadata when different artworks share one screen.
+- Use one saved JSON configuration per venue or screen.
+- Test the exact display orientation and resolution.
+- Test restart behavior before opening.
+- Keep overlays short and legible.
+- Use QR links for deeper context, not long text inside the artwork.
+- Use WebM as reliable browser fallback; convert to H.264 or ProRes with FFmpeg if delivery requires it.
+

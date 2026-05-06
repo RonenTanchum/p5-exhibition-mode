@@ -53,6 +53,7 @@
 - Calibration procedure:
 - Exhibition Mode config / JSON:
 - Playlist source: local helper / remote URLs / single artwork
+- Playlist label text: global only / per artwork item
 - Artwork URL params, for example `ui=false`:
 - Hash mode: fixed hashes / random hashes / none
 - Daily start:

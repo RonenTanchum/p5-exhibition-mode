@@ -188,6 +188,10 @@ export type ExhibitionUiOptions = {
 
 export type ExhibitionPlaylistItem = {
   url: string;
+  title?: string;
+  artist?: string;
+  year?: string | number;
+  freeText?: string;
   randomHash?: boolean;
   hashParam?: string;
 };
@@ -329,6 +333,7 @@ export type ExhibitionMode = {
   setPlaylistRandomHash: (value: boolean) => ExhibitionMode;
   setPlaylistOptions: (options: ExhibitionPlaylistOptions) => ExhibitionMode;
   setPlaylistItems: (items: string | Array<string | ExhibitionPlaylistItem>) => ExhibitionMode;
+  setPlaylistItemMetadata: (index: number, metadata: Pick<ExhibitionPlaylistItem, "title" | "artist" | "year" | "freeText">) => ExhibitionMode;
   setPlaylistHashes: (hashes: string | string[]) => ExhibitionMode;
   setCustomUrlParams: (params: ExhibitionCustomUrlParam[]) => ExhibitionMode;
   restoreDefaultPlaylist: () => ExhibitionMode;

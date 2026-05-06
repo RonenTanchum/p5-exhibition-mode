@@ -78,8 +78,20 @@
     "startIndex": 0,
     "startHashIndex": 0,
     "items": [
-      "https://art.example.com/field-study/index.html",
-      "/Users/example/Artworks/nocturne-system/index.html"
+      {
+        "url": "https://art.example.com/field-study/index.html",
+        "title": "Field Study",
+        "artist": "Phenomena Labs",
+        "year": "2026",
+        "freeText": "A remote artwork entry with its own wall-label text."
+      },
+      {
+        "url": "/Users/example/Artworks/nocturne-system/index.html",
+        "title": "Nocturne System",
+        "artist": "Studio Artist",
+        "year": "2026",
+        "freeText": "A local artwork entry served by the exhibition helper."
+      }
     ]
   }
 }

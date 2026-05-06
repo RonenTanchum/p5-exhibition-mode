@@ -262,6 +262,7 @@ export function createExhibitionMode(options = {}) {
     updatePanel();
     if (state.panelOpen) syncPlaylistRows(state.panel, playlistItems(), { force: true });
     if (state.panelOpen) syncPlaylistHashRows(state.panel, playlistHashes(), { force: true });
+    if (state.panelOpen) syncPlaylistMetadataEditor(state.panel);
   }
 
   async function enterFullscreen() {
@@ -291,9 +292,9 @@ export function createExhibitionMode(options = {}) {
       ? Math.round(performance.memory.usedJSHeapSize / 1048576)
       : null;
     const data = {
-      title: config.title,
-      artist: config.artist,
-      year: config.year,
+      title: currentOverlayMetadata().title,
+      artist: currentOverlayMetadata().artist,
+      year: currentOverlayMetadata().year,
       titleOverlayVisible: Boolean(config.showTitleOverlay),
       titleOverlayFont: config.titleOverlayFont,
       titleOverlayColor: config.titleOverlayColor,
@@ -301,7 +302,7 @@ export function createExhibitionMode(options = {}) {
       titleOverlaySize: config.titleOverlaySize,
       titleOverlayBold: Boolean(config.titleOverlayBold),
       titleOverlayItalic: Boolean(config.titleOverlayItalic),
-      freeText: config.freeText,
+      freeText: currentOverlayMetadata().freeText,
       freeTextVisible: Boolean(config.showFreeText),
       freeTextPosition: config.freeTextPosition,
       freeTextSize: config.freeTextSize,
@@ -670,7 +671,8 @@ export function createExhibitionMode(options = {}) {
       overlay.id = "p5em-title-overlay";
       ensureOverlayLayer().appendChild(overlay);
     }
-    const parts = formatTitleOverlayParts(config);
+    const metadata = currentOverlayMetadata();
+    const parts = formatTitleOverlayParts(metadata);
     overlay.innerHTML = `<span class="p5em-title-name"></span><span class="p5em-title-meta"></span>`;
     overlay.querySelector(".p5em-title-name").textContent = parts.title;
     overlay.querySelector(".p5em-title-meta").textContent = parts.meta ? ` by ${parts.meta}` : "";
@@ -685,7 +687,8 @@ export function createExhibitionMode(options = {}) {
 
   function applyFreeTextOverlay() {
     let overlay = document.getElementById("p5em-free-text-overlay");
-    if (!config.showFreeText || !config.freeText || normalizeOverlayLayout(config.overlayLayout) === "card") {
+    const metadata = currentOverlayMetadata();
+    if (!config.showFreeText || !metadata.freeText || normalizeOverlayLayout(config.overlayLayout) === "card") {
       overlay?.remove();
       scheduleOverlayStacking();
       return;
@@ -695,7 +698,7 @@ export function createExhibitionMode(options = {}) {
       overlay.id = "p5em-free-text-overlay";
       ensureOverlayLayer().appendChild(overlay);
     }
-    overlay.textContent = config.freeText;
+    overlay.textContent = metadata.freeText;
     overlay.dataset.position = normalizeOverlayPosition(config.freeTextPosition);
     overlay.dataset.color = normalizeTitleColor(config.titleOverlayColor);
     overlay.dataset.font = normalizeTitleFont(config.titleOverlayFont);
@@ -790,8 +793,9 @@ export function createExhibitionMode(options = {}) {
 
   function applyOverlayCard() {
     let overlay = document.getElementById("p5em-card-overlay");
+    const metadata = currentOverlayMetadata();
     const showTitle = Boolean(config.showTitleOverlay);
-    const showFreeText = Boolean(config.showFreeText && config.freeText);
+    const showFreeText = Boolean(config.showFreeText && metadata.freeText);
     const showQr = Boolean(config.showQr && config.qrLink);
     if (normalizeOverlayLayout(config.overlayLayout) !== "card" || (!showTitle && !showFreeText && !showQr)) {
       overlay?.remove();
@@ -841,12 +845,12 @@ export function createExhibitionMode(options = {}) {
     copy.hidden = !showTitle && !showFreeText;
     const title = overlay.querySelector("strong");
     title.hidden = !showTitle;
-    title.textContent = config.title || "Artwork Title";
+    title.textContent = metadata.title || "Artwork Title";
     const free = overlay.querySelector("p");
     free.hidden = !showFreeText;
-    free.textContent = config.freeText || "";
+    free.textContent = metadata.freeText || "";
     free.style.fontSize = `${clamp(Number(config.freeTextSize) || DEFAULTS.freeTextSize, 8, 48)}px`;
-    overlay.querySelector("span").textContent = [config.artist || "Artist Name", config.year].filter(Boolean).join(" · ");
+    overlay.querySelector("span").textContent = [metadata.artist || "Artist Name", metadata.year].filter(Boolean).join(" · ");
     const image = overlay.querySelector("img");
     image.hidden = !showQr;
     if (showQr) {
@@ -857,6 +861,22 @@ export function createExhibitionMode(options = {}) {
     } else {
       image.removeAttribute("src");
     }
+  }
+
+  function currentOverlayMetadata() {
+    const item = activePlaylistItem();
+    return {
+      title: metadataValue(item?.title, config.title),
+      artist: metadataValue(item?.artist, config.artist),
+      year: metadataValue(item?.year, config.year),
+      freeText: metadataValue(item?.freeText, config.freeText)
+    };
+  }
+
+  function activePlaylistItem() {
+    const items = playlistItems();
+    if (!state.playlistEnabled || !items.length) return null;
+    return items[((state.playlistIndex % items.length) + items.length) % items.length] || null;
   }
 
   function ensureOverlayLayer() {
@@ -1020,6 +1040,9 @@ export function createExhibitionMode(options = {}) {
     const hash = options.hash ?? currentPlaylistHash(playlist);
     const url = buildPlaylistUrl(resolvePlaylistItem(items[state.playlistIndex]), playlist, hash);
     updateCurrentSource(url, playlist.hashParam || "hash", options.keepUrlTimer ? "hash interval" : "playlist");
+    applyTitleOverlay();
+    applyFreeTextOverlay();
+    applyOverlayCard();
     state.playlistFrame.src = url;
     state.playlistFrame.hidden = false;
     document.documentElement.classList.add("p5em-playlist-active");
@@ -1034,6 +1057,9 @@ export function createExhibitionMode(options = {}) {
     const playlist = playlistConfig();
     const builtUrl = buildPlaylistUrl(resolvePlaylistItem(cleanUrl), playlist, currentPlaylistHash(playlist));
     updateCurrentSource(builtUrl, playlist.hashParam || "hash", "preview");
+    applyTitleOverlay();
+    applyFreeTextOverlay();
+    applyOverlayCard();
     state.playlistFrame.src = builtUrl;
     state.playlistFrame.hidden = false;
     state.playlistLastHashAt = performance.now();
@@ -1118,6 +1144,11 @@ export function createExhibitionMode(options = {}) {
     if (state.playlistFrame) state.playlistFrame.hidden = !state.playlistEnabled;
     document.documentElement.classList.toggle("p5em-playlist-active", Boolean(state.playlistEnabled));
     if (state.playlistEnabled) loadPlaylistItem(state.playlistIndex);
+    else {
+      applyTitleOverlay();
+      applyFreeTextOverlay();
+      applyOverlayCard();
+    }
     persistConfig();
     updatePanel();
     return api;
@@ -1213,6 +1244,35 @@ export function createExhibitionMode(options = {}) {
     updatePanel();
     syncPlaylistRows(state.panel, normalized, { force: true });
     persistConfig();
+    return api;
+  }
+
+  function setPlaylistItemMetadata(index, metadata = {}) {
+    const playlist = playlistConfig();
+    const items = normalizePlaylistItems(playlist.items);
+    if (!items.length) return api;
+    const safeIndex = clamp(Number(index) || 0, 0, items.length - 1);
+    const current = typeof items[safeIndex] === "string" ? { url: items[safeIndex] } : { ...items[safeIndex] };
+    const next = {
+      ...current,
+      title: String(metadata.title || "").trim(),
+      artist: String(metadata.artist || "").trim(),
+      year: String(metadata.year || "").trim(),
+      freeText: String(metadata.freeText || "")
+    };
+    Object.keys(next).forEach((key) => {
+      if (key !== "url" && (next[key] === "" || next[key] === undefined || next[key] === null)) delete next[key];
+    });
+    const hasSpecialFields = Object.keys(next).some((key) => !["url", "title", "artist", "year", "freeText"].includes(key));
+    items[safeIndex] = hasPlaylistItemMetadata(next) || hasSpecialFields ? next : next.url;
+    config.playlist = { ...playlist, items };
+    if (safeIndex === state.playlistIndex) {
+      applyTitleOverlay();
+      applyFreeTextOverlay();
+      applyOverlayCard();
+    }
+    persistConfig();
+    updatePanel();
     return api;
   }
 
@@ -2213,10 +2273,10 @@ export function createExhibitionMode(options = {}) {
     setChecked("high-contrast", d.highContrast);
     setChecked("title-overlay", d.titleOverlayVisible);
     setChecked("qr-overlay", d.qrVisible);
-    setInputValue("artwork-title", d.title);
-    setInputValue("artwork-artist", d.artist);
-    setInputValue("artwork-year", d.year);
-    setInputValue("free-text", d.freeText);
+    setInputValue("artwork-title", config.title);
+    setInputValue("artwork-artist", config.artist);
+    setInputValue("artwork-year", config.year);
+    setInputValue("free-text", config.freeText);
     setInputValue("current-hash", d.currentHash);
     setInputValue("qr-link", d.qrLink);
     setInputValue("overlay-layout", d.overlayLayout);
@@ -2322,6 +2382,7 @@ export function createExhibitionMode(options = {}) {
     setPlaylistRandomHash,
     setPlaylistOptions,
     setPlaylistItems,
+    setPlaylistItemMetadata,
     setPlaylistHashes,
     setCustomUrlParams,
     restoreDefaultPlaylist,
@@ -2437,6 +2498,48 @@ function createPanel(config, api) {
             <span>Free Text</span>
             <textarea data-input="free-text" rows="3" placeholder="Description, caption, venue note...">${escapeHtml(config.freeText)}</textarea>
           </label>
+          <div class="p5em-overlay-subtabs p5em-wide-control">
+            <button type="button" class="is-active" data-action="overlay-global-mode">Global Text</button>
+            <button type="button" data-action="overlay-playlist-mode">Per Playlist Item</button>
+          </div>
+          <div class="p5em-playlist-metadata-editor p5em-wide-control" data-playlist-metadata-editor hidden>
+            <div class="p5em-playlist-metadata-toolbar">
+              <label class="p5em-text-control">
+                <span>Playlist Item</span>
+                <select data-input="playlist-metadata-index"></select>
+              </label>
+              <div class="p5em-button-row">
+                <button type="button" data-action="playlist-metadata-prev">Prev</button>
+                <button type="button" data-action="playlist-metadata-next">Next</button>
+                <button type="button" data-action="playlist-metadata-add">Add Item</button>
+              </div>
+            </div>
+            <div class="p5em-playlist-metadata-summary" data-p5em="playlist-metadata-summary">No playlist item selected.</div>
+            <div class="p5em-button-row">
+              <button type="button" data-action="playlist-metadata-toggle-details" data-expanded="false">Edit Item Text</button>
+              <button type="button" data-action="playlist-metadata-copy-global">Use Global Text</button>
+              <button type="button" data-action="playlist-metadata-clear">Clear Item Text</button>
+            </div>
+            <div class="p5em-playlist-metadata-details" data-playlist-metadata-details hidden>
+              <label class="p5em-text-control">
+                <span>Item Title</span>
+                <input data-input="playlist-metadata-title" type="text" placeholder="Falls back to global title">
+              </label>
+              <label class="p5em-text-control">
+                <span>Item Artist</span>
+                <input data-input="playlist-metadata-artist" type="text" placeholder="Falls back to global artist">
+              </label>
+              <label class="p5em-text-control">
+                <span>Item Year</span>
+                <input data-input="playlist-metadata-year" type="text" placeholder="Falls back to global year">
+              </label>
+              <label class="p5em-text-control p5em-wide-control">
+                <span>Item Free Text</span>
+                <textarea data-input="playlist-metadata-free-text" rows="3" placeholder="Falls back to global free text"></textarea>
+              </label>
+            </div>
+            <p>Item text overrides the global overlay only while that playlist URL or local path is playing. Use Add Item for a new playlist row, then paste its URL in the Playlist tab.</p>
+          </div>
         </div>
         <div class="p5em-control-group p5em-control-group-wide p5em-compact-group">
           <h2>Layout</h2>
@@ -2692,6 +2795,63 @@ function createPanel(config, api) {
     if (action === "hash-record-stop") api.stopHashRecording();
     if (action === "hash-record-export") api.exportHashRecording();
     if (action === "hash-record-clear") api.clearHashRecording();
+    if (action === "overlay-global-mode") setOverlayMetadataMode(panel, "global");
+    if (action === "overlay-playlist-mode") {
+      setOverlayMetadataMode(panel, "playlist");
+      syncPlaylistMetadataEditor(panel);
+    }
+    if (action === "playlist-metadata-copy-global") {
+      const selected = selectedPlaylistMetadataRow(panel);
+      if (selected) {
+        const index = selectedPlaylistMetadataIndex(panel);
+        setPlaylistRowMetadata(selected, {
+          title: panel.querySelector("[data-input='artwork-title']")?.value || "",
+          artist: panel.querySelector("[data-input='artwork-artist']")?.value || "",
+          year: panel.querySelector("[data-input='artwork-year']")?.value || "",
+          freeText: panel.querySelector("[data-input='free-text']")?.value || ""
+        });
+        syncPlaylistMetadataEditor(panel);
+        api.setPlaylistItemMetadata(index, collectPlaylistRowMetadata(selected));
+      }
+    }
+    if (action === "playlist-metadata-clear") {
+      const selected = selectedPlaylistMetadataRow(panel);
+      if (selected) {
+        const index = selectedPlaylistMetadataIndex(panel);
+        setPlaylistRowMetadata(selected, {});
+        syncPlaylistMetadataEditor(panel);
+        api.setPlaylistItemMetadata(index, {});
+      }
+    }
+    if (action === "playlist-metadata-toggle-details") {
+      const details = panel.querySelector("[data-playlist-metadata-details]");
+      if (details) {
+        const expanded = details.hidden;
+        details.hidden = !expanded;
+        event.target.dataset.expanded = expanded ? "true" : "false";
+        event.target.textContent = expanded ? "Hide Item Text" : "Edit Item Text";
+      }
+    }
+    if (action === "playlist-metadata-prev" || action === "playlist-metadata-next") {
+      const select = panel.querySelector("[data-input='playlist-metadata-index']");
+      const rows = Array.from(panel.querySelectorAll(".p5em-playlist-row"));
+      if (select && rows.length) {
+        const direction = action === "playlist-metadata-prev" ? -1 : 1;
+        const nextIndex = (selectedPlaylistMetadataIndex(panel) + direction + rows.length) % rows.length;
+        select.value = String(nextIndex);
+        syncPlaylistMetadataEditor(panel);
+      }
+    }
+    if (action === "playlist-metadata-add") {
+      addPlaylistRow(panel, { url: "" });
+      const rows = Array.from(panel.querySelectorAll(".p5em-playlist-row"));
+      const select = panel.querySelector("[data-input='playlist-metadata-index']");
+      if (select && rows.length) select.value = String(rows.length - 1);
+      const container = panel.querySelector("[data-playlist-rows]");
+      if (container) container.dataset.dirty = "true";
+      syncPlaylistMetadataEditor(panel);
+      api.setPlaylistItems(collectPlaylistRows(panel));
+    }
     if (action === "playlist-apply") {
       api.setPlaylistItems(collectPlaylistRows(panel));
       api.setPlaylistHashes(collectPlaylistHashRows(panel));
@@ -2720,11 +2880,13 @@ function createPanel(config, api) {
       addPlaylistRow(panel, "");
       const container = panel.querySelector("[data-playlist-rows]");
       if (container) container.dataset.dirty = "true";
+      syncPlaylistMetadataEditor(panel);
     }
     if (action === "playlist-remove") {
       event.target.closest(".p5em-playlist-row")?.remove();
       const container = panel.querySelector("[data-playlist-rows]");
       if (container) container.dataset.dirty = "true";
+      syncPlaylistMetadataEditor(panel);
     }
     if (action === "playlist-hash-add") {
       if (playlistConfigFrom(api.getConfig()).randomHash) return;
@@ -2795,6 +2957,9 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "playlist-hash-order") {
       api.setPlaylistOptions({ hashOrder: event.target.value });
     }
+    if (event.target?.dataset?.input === "playlist-metadata-index") {
+      syncPlaylistMetadataEditor(panel);
+    }
     if (event.target?.dataset?.input === "rotation") {
       api.setRotation(event.target.value);
     }
@@ -2864,6 +3029,7 @@ function createPanel(config, api) {
     if (event.target?.dataset?.input === "playlist-kind") {
       const row = event.target.closest(".p5em-playlist-row");
       if (row) updatePlaylistRowKind(row, event.target.value);
+      syncPlaylistMetadataEditor(panel);
     }
     if (event.target?.dataset?.input === "playlist-file") {
       previewDroppedArtwork(event.target, api, event.target.closest(".p5em-playlist-row"));
@@ -2874,6 +3040,16 @@ function createPanel(config, api) {
       const container = panel.querySelector("[data-playlist-hash-rows]");
       if (container) container.dataset.dirty = "true";
       api.setPlaylistHashes(collectPlaylistHashRows(panel));
+    }
+    if (event.target?.dataset?.input?.startsWith("playlist-metadata-") && event.target?.dataset?.input !== "playlist-metadata-index") {
+      const row = selectedPlaylistMetadataRow(panel);
+      if (row) {
+        const index = selectedPlaylistMetadataIndex(panel);
+        setPlaylistRowMetadata(row, collectPlaylistMetadataEditor(panel));
+        const container = panel.querySelector("[data-playlist-rows]");
+        if (container) container.dataset.dirty = "true";
+        api.setPlaylistItemMetadata(index, collectPlaylistRowMetadata(row));
+      }
     }
     if (event.target?.dataset?.input === "custom-url-param-name" || event.target?.dataset?.input === "custom-url-param-value") {
       const container = panel.querySelector("[data-custom-url-param-rows]");
@@ -2887,6 +3063,7 @@ function createPanel(config, api) {
   });
   syncPlaylistRows(panel, playlistConfigFrom(config).items);
   syncPlaylistHashRows(panel, playlistConfigFrom(config).hashes);
+  syncPlaylistMetadataEditor(panel);
   syncCustomUrlParamRows(panel, normalizeCustomUrlParams(config.customUrlParams));
   return panel;
 }
@@ -3066,11 +3243,12 @@ function syncPlaylistRows(panel, items, options = {}) {
   const container = panel?.querySelector("[data-playlist-rows]");
   if (!container || (!options.force && container.dataset.editing === "true")) return;
   if (!options.force && container.dataset.dirty === "true") return;
-  const urls = normalizePlaylistItems(items).map((item) => typeof item === "string" ? item : item.url);
+  const rows = normalizePlaylistItems(items);
   container.innerHTML = "";
   container.dataset.dirty = "false";
   container.dataset.editing = "false";
-  (urls.length ? urls : [""]).forEach((url) => addPlaylistRow(panel, url));
+  (rows.length ? rows : [""]).forEach((item) => addPlaylistRow(panel, item));
+  syncPlaylistMetadataEditor(panel);
 }
 
 function syncPlaylistHashRows(panel, hashes, options = {}) {
@@ -3130,11 +3308,15 @@ function updateSpecificHashSectionState(panel, disabled) {
   });
 }
 
-function addPlaylistRow(panel, value = "") {
+function addPlaylistRow(panel, item = "") {
   const container = panel.querySelector("[data-playlist-rows]");
   if (!container) return;
+  const normalizedItem = typeof item === "string" ? { url: item } : { ...(item || {}) };
+  const value = normalizedItem.url || "";
   const row = document.createElement("div");
   row.className = "p5em-playlist-row";
+  row.__p5emItem = normalizedItem;
+  setPlaylistRowMetadata(row, normalizedItem);
   const kind = isLikelyRemoteUrl(value) ? "url" : "local";
   row.dataset.kind = kind;
   row.innerHTML = `
@@ -3166,12 +3348,15 @@ function addPlaylistRow(panel, value = "") {
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("input", () => {
     row.querySelector("[data-input='playlist-url']").dataset.temporaryPreview = "false";
+    row.__p5emItem = { ...(row.__p5emItem || {}), url: row.querySelector("[data-input='playlist-url']").value.trim() };
     container.dataset.dirty = "true";
+    syncPlaylistMetadataEditor(panel);
   });
   row.querySelector("[data-input='playlist-url']").addEventListener("blur", () => {
     container.dataset.editing = "false";
   });
   container.appendChild(row);
+  syncPlaylistMetadataEditor(panel);
 }
 
 function addPlaylistHashRow(panel, value = "") {
@@ -3202,6 +3387,103 @@ function updatePlaylistRowKind(row, kind) {
   if (input) {
     input.placeholder = kind === "local" ? "./local-sketch/index.html" : "https://example.com/artwork/index.html";
   }
+}
+
+function setOverlayMetadataMode(panel, mode) {
+  const usePlaylist = mode === "playlist";
+  panel.querySelector("[data-action='overlay-global-mode']")?.classList.toggle("is-active", !usePlaylist);
+  panel.querySelector("[data-action='overlay-playlist-mode']")?.classList.toggle("is-active", usePlaylist);
+  const editor = panel.querySelector("[data-playlist-metadata-editor]");
+  if (editor) editor.hidden = !usePlaylist;
+}
+
+function syncPlaylistMetadataEditor(panel) {
+  if (!panel) return;
+  const editor = panel.querySelector("[data-playlist-metadata-editor]");
+  const select = panel.querySelector("[data-input='playlist-metadata-index']");
+  const summary = panel.querySelector("[data-p5em='playlist-metadata-summary']");
+  if (!editor || !select) return;
+  const rows = Array.from(panel.querySelectorAll(".p5em-playlist-row"));
+  const previous = Number(select.value);
+  select.innerHTML = rows.map((row, index) => {
+    const url = row.querySelector("[data-input='playlist-url']")?.value || "";
+    const label = shortenMiddle(url || `Playlist item ${index + 1}`, 56);
+    return `<option value="${index}">${index + 1}. ${escapeHtml(label)}</option>`;
+  }).join("");
+  const nextIndex = clamp(Number.isFinite(previous) ? previous : 0, 0, Math.max(0, rows.length - 1));
+  select.value = String(nextIndex);
+  editor.querySelectorAll("input, textarea, select, button").forEach((control) => {
+    const canAddWithoutRows = control.dataset.action === "playlist-metadata-add";
+    control.disabled = !rows.length && !canAddWithoutRows;
+  });
+  const row = rows[nextIndex];
+  const metadata = row ? collectPlaylistRowMetadata(row) : {};
+  setFieldValue(editor, "playlist-metadata-title", metadata.title || "");
+  setFieldValue(editor, "playlist-metadata-artist", metadata.artist || "");
+  setFieldValue(editor, "playlist-metadata-year", metadata.year || "");
+  setFieldValue(editor, "playlist-metadata-free-text", metadata.freeText || "");
+  if (summary) {
+    if (!row) {
+      summary.textContent = "No playlist item selected. Add an item or create rows in the Playlist tab.";
+    } else if (hasPlaylistItemMetadata(metadata)) {
+      const title = metadata.title || "Global title";
+      const artistYear = [metadata.artist, metadata.year].filter(Boolean).join(", ");
+      const freeText = metadata.freeText ? ` - ${metadata.freeText}` : "";
+      summary.textContent = `${title}${artistYear ? ` by ${artistYear}` : ""}${freeText}`;
+    } else {
+      summary.textContent = "Using global overlay text for this playlist item.";
+    }
+  }
+}
+
+function selectedPlaylistMetadataRow(panel) {
+  const index = selectedPlaylistMetadataIndex(panel);
+  return Array.from(panel.querySelectorAll(".p5em-playlist-row"))[index] || null;
+}
+
+function selectedPlaylistMetadataIndex(panel) {
+  return Number(panel.querySelector("[data-input='playlist-metadata-index']")?.value) || 0;
+}
+
+function collectPlaylistMetadataEditor(panel) {
+  return {
+    title: panel.querySelector("[data-input='playlist-metadata-title']")?.value || "",
+    artist: panel.querySelector("[data-input='playlist-metadata-artist']")?.value || "",
+    year: panel.querySelector("[data-input='playlist-metadata-year']")?.value || "",
+    freeText: panel.querySelector("[data-input='playlist-metadata-free-text']")?.value || ""
+  };
+}
+
+function setPlaylistRowMetadata(row, metadata = {}) {
+  row.dataset.metaTitle = String(metadata.title || "");
+  row.dataset.metaArtist = String(metadata.artist || "");
+  row.dataset.metaYear = String(metadata.year || "");
+  row.dataset.metaFreeText = String(metadata.freeText || "");
+  row.__p5emItem = {
+    ...(row.__p5emItem || {}),
+    title: row.dataset.metaTitle,
+    artist: row.dataset.metaArtist,
+    year: row.dataset.metaYear,
+    freeText: row.dataset.metaFreeText
+  };
+}
+
+function collectPlaylistRowMetadata(row) {
+  return {
+    title: row.dataset.metaTitle || "",
+    artist: row.dataset.metaArtist || "",
+    year: row.dataset.metaYear || "",
+    freeText: row.dataset.metaFreeText || ""
+  };
+}
+
+function hasPlaylistItemMetadata(item = {}) {
+  return ["title", "artist", "year", "freeText"].some((key) => String(item[key] || "").trim());
+}
+
+function setFieldValue(root, inputName, value) {
+  const field = root.querySelector(`[data-input='${inputName}']`);
+  if (field) field.value = value;
 }
 
 async function previewDroppedArtwork(source, api, row = null) {
@@ -3350,9 +3632,24 @@ function pathBasename(value) {
 }
 
 function collectPlaylistRows(panel) {
-  return Array.from(panel.querySelectorAll("[data-input='playlist-url']"))
-    .filter((input) => input.dataset.temporaryPreview !== "true")
-    .map((input) => input.value.trim())
+  return Array.from(panel.querySelectorAll(".p5em-playlist-row"))
+    .map((row) => {
+      const input = row.querySelector("[data-input='playlist-url']");
+      if (!input || input.dataset.temporaryPreview === "true") return null;
+      const url = input.value.trim();
+      if (!url) return null;
+      const base = { ...(row.__p5emItem || {}), url };
+      const metadata = collectPlaylistRowMetadata(row);
+      const item = { ...base, ...metadata };
+      Object.keys(item).forEach((key) => {
+        if (key !== "url" && (item[key] === "" || item[key] === undefined || item[key] === null)) delete item[key];
+      });
+      const hasObjectFields = typeof row.__p5emItem === "object"
+        && Object.keys(row.__p5emItem || {}).some((key) => !["url", "title", "artist", "year", "freeText"].includes(key));
+      return hasPlaylistItemMetadata(item) || hasObjectFields
+        ? item
+        : url;
+    })
     .filter(Boolean);
 }
 
@@ -4148,6 +4445,7 @@ function injectStyles() {
       text-transform: uppercase;
     }
     .p5em-text-control input,
+    .p5em-text-control select,
     .p5em-text-control textarea {
       min-width: 0;
       padding: 5px 7px;
@@ -4163,6 +4461,81 @@ function injectStyles() {
       resize: vertical;
       text-transform: none;
       letter-spacing: 0.02em;
+    }
+    .p5em-overlay-subtabs {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .p5em-overlay-subtabs button {
+      padding: 6px 8px;
+      color: rgba(255,255,255,0.56);
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.16);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .p5em-overlay-subtabs button.is-active {
+      color: rgba(255,255,255,0.92);
+      border-color: rgba(255,255,255,0.44);
+      background: rgba(255,255,255,0.07);
+    }
+    .p5em-playlist-metadata-editor {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      padding: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.025);
+    }
+    .p5em-playlist-metadata-editor[hidden] {
+      display: none;
+    }
+    .p5em-playlist-metadata-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .p5em-playlist-metadata-toolbar .p5em-button-row {
+      align-self: end;
+      margin: 0;
+      flex-wrap: nowrap;
+    }
+    .p5em-playlist-metadata-summary {
+      min-height: 30px;
+      padding: 7px 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.62);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+    .p5em-playlist-metadata-details {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 10px;
+      padding-top: 4px;
+    }
+    .p5em-playlist-metadata-details[hidden] {
+      display: none;
+    }
+    .p5em-playlist-metadata-editor p {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: rgba(255,255,255,0.38);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      line-height: 1.25;
+      text-transform: uppercase;
     }
     .p5em-playlist-editor {
       margin-top: 10px;
@@ -4905,6 +5278,11 @@ function formatTitleOverlayParts(config) {
   return { title, meta: `${artist}${year}` };
 }
 
+function metadataValue(value, fallback = "") {
+  const text = String(value ?? "").trim();
+  return text || fallback || "";
+}
+
 function positionOptions(selected = "top-left") {
   return [
     ["top-left", "Top Left"],
@@ -5306,7 +5684,20 @@ function normalizePlaylistItems(items) {
   return items
     .map((item) => {
       if (typeof item === "string") return isTemporaryBlobUrl(item) ? null : item.trim();
-      if (item && typeof item === "object" && item.url && !isTemporaryBlobUrl(item.url)) return item;
+      if (item && typeof item === "object" && item.url && !isTemporaryBlobUrl(item.url)) {
+        const normalized = {
+          ...item,
+          url: String(item.url || "").trim(),
+          title: String(item.title || "").trim(),
+          artist: String(item.artist || "").trim(),
+          year: String(item.year || "").trim(),
+          freeText: String(item.freeText || "")
+        };
+        Object.keys(normalized).forEach((key) => {
+          if (key !== "url" && (normalized[key] === "" || normalized[key] === undefined || normalized[key] === null)) delete normalized[key];
+        });
+        return normalized;
+      }
       return null;
     })
     .filter(Boolean);

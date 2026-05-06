@@ -26,23 +26,35 @@ The runtime panel is hidden until you need it. Press `Shift + G` to open it.
 
 ## Examples
 
-The example screenshots below are captured after a 10-second build delay, so the generative sketch has time to develop before the frame is taken.
+The example screenshots below use **Apex** and are captured after a 10-second build delay, so the artwork has time to develop before the frame is taken.
 
-### Runtime Artwork
+### Apex Runtime
 
-![p5 Exhibition Mode demo after a 10-second generative build](docs/assets/example-default-runtime.png)
+![Apex running fullscreen after a 10-second generative build](docs/assets/example-apex-runtime.png)
 
-### Floating Exhibition Label
+### Editorial Title
 
-![Floating artwork title and wall text over a p5 generative sketch](docs/assets/example-floating-overlay.png)
+![Large editorial title overlay on Apex](docs/assets/example-apex-editorial-title.png)
+
+### Bottom Caption
+
+![Bottom-left caption layout over Apex](docs/assets/example-apex-bottom-caption.png)
 
 ### Card Label With QR
 
-![Card overlay with artwork metadata and QR code over a p5 generative sketch](docs/assets/example-card-overlay.png)
+![Card label with QR code over Apex](docs/assets/example-apex-card-qr.png)
+
+### Right-Aligned Label
+
+![Right-aligned label layout over Apex](docs/assets/example-apex-right-label.png)
+
+### Minimal Hash Label
+
+![Minimal title and hash overlay over Apex](docs/assets/example-apex-minimal-hash.png)
 
 ### Rotated Display
 
-![Rotated exhibition display example with overlay metadata](docs/assets/example-rotated-display.png)
+![Rotated portrait display layout with Apex](docs/assets/example-apex-rotated-display.png)
 
 ## Interface
 

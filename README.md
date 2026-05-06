@@ -24,9 +24,29 @@ Generative artworks are usually built for a browser, but exhibitions ask for a d
 
 The runtime panel is hidden until you need it. Press `Shift + G` to open it.
 
+## Examples
+
+The example screenshots below are captured after a 10-second build delay, so the generative sketch has time to develop before the frame is taken.
+
+### Runtime Artwork
+
+![p5 Exhibition Mode demo after a 10-second generative build](docs/assets/example-default-runtime.png)
+
+### Floating Exhibition Label
+
+![Floating artwork title and wall text over a p5 generative sketch](docs/assets/example-floating-overlay.png)
+
+### Card Label With QR
+
+![Card overlay with artwork metadata and QR code over a p5 generative sketch](docs/assets/example-card-overlay.png)
+
+### Rotated Display
+
+![Rotated exhibition display example with overlay metadata](docs/assets/example-rotated-display.png)
+
 ## Interface
 
-The screenshots below use made-up content and a synthetic artwork background. They show the control surface, not a bundled artwork.
+The screenshots below are cropped to the control surface. They show the UI itself rather than a full-screen artwork composition.
 
 For a practical show-prep workflow, see [docs/exhibition-setup-guide.md](docs/exhibition-setup-guide.md). AI agents can also read [llms.txt](llms.txt) for a concise setup map.
 

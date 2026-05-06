@@ -645,7 +645,7 @@ Developed @ Phenomena Labs.
 
 This project is open source under the MIT license. You can use it, adapt it, and include it in exhibition projects. Credit is appreciated when the tool is used publicly, in documentation, or in production installs.
 
-Donations help keep the tool maintained and available for artists. PayPal donations can be sent to `info@phenomenalabs.com`; crypto donations can be sent to `phenomenalabs.eth`.
+Contributions help keep the tool maintained and available for artists. PayPal contributions can be sent to `info@phenomenalabs.com`; crypto contributions can be sent to `phenomenalabs.eth`.
 
 ## License
 

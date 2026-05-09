@@ -60,7 +60,7 @@ The example screenshots below use **Apex** and are captured after a 10-second bu
 
 The screenshots below are cropped to the control surface. They show the UI itself rather than a full-screen artwork composition.
 
-For a practical show-prep workflow, see [docs/exhibition-setup-guide.md](docs/exhibition-setup-guide.md). AI agents can also read [llms.txt](llms.txt) for a concise setup map.
+For a practical show-prep workflow, see [docs/exhibition-setup-guide.md](docs/exhibition-setup-guide.md). AI agents can also read [llms.txt](llms.txt) for a concise setup map and [AGENTS.md](AGENTS.md) for coding-agent instructions.
 
 ### Runtime
 
